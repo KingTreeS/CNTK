@@ -4,6 +4,11 @@
 //
 #pragma once
 
+#define __PROFILE__
+#ifdef __PROFILE__
+#include "LogPrintInfo.h"
+#endif
+
 #include "Basics.h"
 #include "ComputationNode.h"
 #include "BatchNormalizationEngine.h"
@@ -22,14 +27,23 @@
 #include <memory>
 #include <random>
 
-namespace Microsoft { namespace MSR { namespace CNTK {
+namespace Microsoft
+{
+namespace MSR
+{
+namespace CNTK
+{
+
+#ifdef __PROFILE__
+std::chrono::time_point<std::chrono::system_clock> tnStartTime;
+std::chrono::time_point<std::chrono::system_clock> tnEndTime;
+#endif
 
 // Names of random variable types
-static const wstring RandomDistributionTypeUniform   = L"uniform";
-static const wstring RandomDistributionTypeNormal    = L"normal";
-static const wstring RandomDistributionTypeGumbel    = L"gumbel";
+static const wstring RandomDistributionTypeUniform = L"uniform";
+static const wstring RandomDistributionTypeNormal = L"normal";
+static const wstring RandomDistributionTypeGumbel = L"gumbel";
 static const wstring RandomDistributionTypeBernoulli = L"bernoulli";
-
 
 static const double m_PI = acos(-1.0);
 // Distributed fully connected layer (Y = W'X + b)
@@ -76,8 +90,8 @@ public:
             m_batchSize = m_minibatchSize * m_processNum;
             if (Environment().IsTraining())
             {
-                m_ones->Resize(m_batchSize, 1);                   // Ones
-                m_ones->SetValue((ElemType)1.0);
+                m_ones->Resize(m_batchSize, 1); // Ones
+                m_ones->SetValue((ElemType) 1.0);
             }
         }
         m_temp1->Resize(m_inputDim, m_batchSize);                 // Aggregated X
@@ -255,11 +269,11 @@ public:
             m_batchSize = m_minibatchSize * m_processNum;
             if (Environment().IsTraining())
             {
-                m_ones->Resize(m_batchSize, 1);                   // Ones
-                m_ones->SetValue((ElemType)1.0);
+                m_ones->Resize(m_batchSize, 1); // Ones
+                m_ones->SetValue((ElemType) 1.0);
             }
         }
-        m_temp1->Resize(m_inputDim, m_batchSize);                 // Aggregated X
+        m_temp1->Resize(m_inputDim, m_batchSize); // Aggregated X
     }
 
     virtual void BackpropToNonLooping(size_t inputIndex) override
@@ -313,7 +327,7 @@ public:
         Base::Validate(isFinalValidationPass);
 
         InferMBLayoutFromInputsForStandardCase(isFinalValidationPass);
-        m_inputDim  = InputRef(0).Value().GetNumRows();
+        m_inputDim = InputRef(0).Value().GetNumRows();
         m_outputDim = InputRef(0).Value().GetNumCols();
         SetDims(TensorShape(m_outputDim), HasMBLayout());
     }
@@ -324,12 +338,12 @@ public:
         if (flags & CopyNodeFlags::copyNodeValue)
         {
             auto node = dynamic_pointer_cast<DistributedFullyConnectedNode_v2<ElemType>>(nodeP);
-            node->m_rank           = m_rank;
-            node->m_processNum     = m_processNum;
-            node->m_inputDim       = m_inputDim;
-            node->m_outputDim      = m_outputDim;
-            node->m_minibatchSize  = m_minibatchSize;
-            node->m_batchSize      = m_batchSize;
+            node->m_rank = m_rank;
+            node->m_processNum = m_processNum;
+            node->m_inputDim = m_inputDim;
+            node->m_outputDim = m_outputDim;
+            node->m_minibatchSize = m_minibatchSize;
+            node->m_batchSize = m_batchSize;
             node->m_distGradAggPtr = m_distGradAggPtr;
             node->m_temp1->SetValue(*m_temp1);
             node->m_ones->SetValue(*m_ones);
@@ -472,11 +486,11 @@ public:
         if (flags & CopyNodeFlags::copyNodeValue)
         {
             auto node = dynamic_pointer_cast<DistributedCrossEntropyWithSoftmaxNode<ElemType>>(nodeP);
-            node->m_rank           = m_rank;
-            node->m_processNum     = m_processNum;
-            node->m_minibatchSize  = m_minibatchSize;
-            node->m_batchSize      = m_batchSize;
-            node->m_probDim        = m_probDim;
+            node->m_rank = m_rank;
+            node->m_processNum = m_processNum;
+            node->m_minibatchSize = m_minibatchSize;
+            node->m_batchSize = m_batchSize;
+            node->m_probDim = m_probDim;
             node->m_distGradAggPtr = m_distGradAggPtr;
             node->m_logSoftmaxOfRight->SetValue(*m_logSoftmaxOfRight);
             node->m_softmaxOfRight->SetValue(*m_softmaxOfRight);
@@ -588,7 +602,7 @@ public:
             m_minibatchSize = minibatchSize;
             m_batchSize = m_minibatchSize * m_processNum;
         }
-        m_temp1->Resize(m_inputDim, m_batchSize);                 // Aggregated X
+        m_temp1->Resize(m_inputDim, m_batchSize); // Aggregated X
         if (m_weightNormalize)
             m_WNorm->Resize(1, m_outputDim);
         if (DistributedGatheredLabels<ElemType>::isInitializeNode(this))
@@ -597,9 +611,9 @@ public:
 
     virtual void BackpropToNonLooping(size_t inputIndex) override
     {
-        if (1 == inputIndex)      // for W
+        if (1 == inputIndex) // for W
         {
-            Matrix<ElemType>::Scale((ElemType)m_scale, Gradient());
+            Matrix<ElemType>::Scale((ElemType) m_scale, Gradient());
             auto& W_gradient = InputRef(1).Gradient();
             Matrix<ElemType>::Multiply(*m_temp1, false, Gradient(), true, W_gradient);
         }
@@ -622,13 +636,46 @@ public:
             W.VectorNorm2(*m_WNorm, true);
             W.RowElementDivideBy(*m_WNorm);
         }
+
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
+
         if (DistributedGatheredLabels<ElemType>::isInitializeNode(this))
             DistributedGatheredLabels<ElemType>::gatherDistributedLabels(InputRef(0).Value());
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
+
         m_distGradAggPtr->DistributedAllGather(X, *m_temp1, m_inputDim * m_minibatchSize);
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
         Matrix<ElemType>::Multiply(W, true, *m_temp1, false, Value());
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnMatrixMultiplyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
+
         if (Environment().IsTraining())
-            Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType)m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
-        Matrix<ElemType>::Scale((ElemType)m_scale, Value());
+#ifdef __PROFILE__
+            tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
+            Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
+#ifdef __PROFILE__
+			tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
+
+#ifdef __PROFILE__
+		tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
+        Matrix<ElemType>::Scale((ElemType) m_scale, Value());
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnMatrixScaleTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
     }
 
     virtual bool OutputUsedInComputingInputNodesGradients() const override
@@ -663,16 +710,16 @@ public:
         if (flags & CopyNodeFlags::copyNodeValue)
         {
             auto node = dynamic_pointer_cast<DistributedAdditiveFullConnectionNode<ElemType>>(nodeP);
-            node->m_rank            = m_rank;
-            node->m_processNum      = m_processNum;
-            node->m_inputDim        = m_inputDim;
-            node->m_outputDim       = m_outputDim;
-            node->m_minibatchSize   = m_minibatchSize;
-            node->m_batchSize       = m_batchSize;
+            node->m_rank = m_rank;
+            node->m_processNum = m_processNum;
+            node->m_inputDim = m_inputDim;
+            node->m_outputDim = m_outputDim;
+            node->m_minibatchSize = m_minibatchSize;
+            node->m_batchSize = m_batchSize;
             node->m_weightNormalize = m_weightNormalize;
-            node->m_bias            = m_bias;
-            node->m_scale           = m_scale;
-            node->m_distGradAggPtr  = m_distGradAggPtr;
+            node->m_bias = m_bias;
+            node->m_scale = m_scale;
+            node->m_distGradAggPtr = m_distGradAggPtr;
             node->m_temp1->SetValue(*m_temp1);
         }
     }
@@ -790,7 +837,7 @@ public:
             m_minibatchSize = minibatchSize;
             m_batchSize = m_minibatchSize * m_processNum;
         }
-        m_temp1->Resize(m_inputDim, m_batchSize);                 // Aggregated X
+        m_temp1->Resize(m_inputDim, m_batchSize); // Aggregated X
         m_tempValue->Resize(1, m_batchSize);
         m_flag->Resize(1, m_batchSize);
         m_WNorm->Resize(1, m_outputDim);
@@ -800,10 +847,10 @@ public:
 
     virtual void BackpropToNonLooping(size_t inputIndex) override
     {
-        if (1 == inputIndex)      // for W
+        if (1 == inputIndex) // for W
         {
-            Matrix<ElemType>::Scale((ElemType)m_scale, Gradient());
-            Matrix<ElemType>::DistributedArcLabelAddBackprop(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType)m_cosBias, (ElemType)m_sinBias, *m_flag, *m_tempValue, Gradient(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
+            Matrix<ElemType>::Scale((ElemType) m_scale, Gradient());
+            Matrix<ElemType>::DistributedArcLabelAddBackprop(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_cosBias, (ElemType) m_sinBias, *m_flag, *m_tempValue, Gradient(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
 
             auto& W_gradient = InputRef(1).Gradient();
             Matrix<ElemType>::Multiply(*m_temp1, false, Gradient(), true, W_gradient);
@@ -832,9 +879,9 @@ public:
         if (Environment().IsTraining())
         {
             m_flag->SetValue(0);
-            Matrix<ElemType>::DistributedArcLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType)m_threshold, (ElemType)m_bias, (ElemType)m_sinBias, *m_flag, *m_tempValue, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
+            Matrix<ElemType>::DistributedArcLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_threshold, (ElemType) m_bias, (ElemType) m_sinBias, *m_flag, *m_tempValue, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
         }
-        Matrix<ElemType>::Scale((ElemType)m_scale, Value());
+        Matrix<ElemType>::Scale((ElemType) m_scale, Value());
     }
 
     virtual bool OutputUsedInComputingInputNodesGradients() const override
@@ -869,17 +916,17 @@ public:
         if (flags & CopyNodeFlags::copyNodeValue)
         {
             auto node = dynamic_pointer_cast<DistributedArcMarginProductNode<ElemType>>(nodeP);
-            node->m_rank           = m_rank;
-            node->m_processNum     = m_processNum;
-            node->m_inputDim       = m_inputDim;
-            node->m_outputDim      = m_outputDim;
-            node->m_minibatchSize  = m_minibatchSize;
-            node->m_batchSize      = m_batchSize;
-            node->m_bias           = m_bias;
-            node->m_threshold      = m_threshold;
-            node->m_cosBias        = m_cosBias;
-            node->m_sinBias        = m_sinBias;
-            node->m_scale          = m_scale;
+            node->m_rank = m_rank;
+            node->m_processNum = m_processNum;
+            node->m_inputDim = m_inputDim;
+            node->m_outputDim = m_outputDim;
+            node->m_minibatchSize = m_minibatchSize;
+            node->m_batchSize = m_batchSize;
+            node->m_bias = m_bias;
+            node->m_threshold = m_threshold;
+            node->m_cosBias = m_cosBias;
+            node->m_sinBias = m_sinBias;
+            node->m_scale = m_scale;
             node->m_distGradAggPtr = m_distGradAggPtr;
             node->m_temp1->SetValue(*m_temp1);
             node->m_tempValue->SetValue(*m_tempValue);
@@ -998,32 +1045,32 @@ public:
 
         switch (m_marginCoefficient)
         {
-            case 1:
-                break;
-            case 2:
-            {
-                m_cosThetaQuadratic->Resize(m_outputDimension, m_minibatchSize);
-                break;
-            }
-            case 3:
-            {
-                m_cosThetaQuadratic->Resize(m_outputDimension, m_minibatchSize);
-                m_cosThetaCubic->Resize(m_outputDimension, m_minibatchSize);
-                m_sign1->Resize(m_outputDimension, m_minibatchSize);
-                m_sign2->Resize(m_outputDimension, m_minibatchSize);
-                break;
-            }
-            case 4:
-            {
-                m_cosThetaQuadratic->Resize(m_outputDimension, m_minibatchSize);
-                m_cosThetaCubic->Resize(m_outputDimension, m_minibatchSize);
-                m_cosThetaQuartic->Resize(m_outputDimension, m_minibatchSize);
-                m_sign3->Resize(m_outputDimension, m_minibatchSize);
-                m_sign4->Resize(m_outputDimension, m_minibatchSize);
-                break;
-            }
-            default:
-                LogicError("This marginCoefficient is not supported yet.");
+        case 1:
+            break;
+        case 2:
+        {
+            m_cosThetaQuadratic->Resize(m_outputDimension, m_minibatchSize);
+            break;
+        }
+        case 3:
+        {
+            m_cosThetaQuadratic->Resize(m_outputDimension, m_minibatchSize);
+            m_cosThetaCubic->Resize(m_outputDimension, m_minibatchSize);
+            m_sign1->Resize(m_outputDimension, m_minibatchSize);
+            m_sign2->Resize(m_outputDimension, m_minibatchSize);
+            break;
+        }
+        case 4:
+        {
+            m_cosThetaQuadratic->Resize(m_outputDimension, m_minibatchSize);
+            m_cosThetaCubic->Resize(m_outputDimension, m_minibatchSize);
+            m_cosThetaQuartic->Resize(m_outputDimension, m_minibatchSize);
+            m_sign3->Resize(m_outputDimension, m_minibatchSize);
+            m_sign4->Resize(m_outputDimension, m_minibatchSize);
+            break;
+        }
+        default:
+            LogicError("This marginCoefficient is not supported yet.");
         }
 
         m_tempMatrix->Resize(m_outputDimension, m_minibatchSize);
@@ -1042,28 +1089,28 @@ public:
 
             switch (m_marginCoefficient)
             {
-                case 1:
-                    break;
-                case 2:
-                {
-                    Matrix<ElemType>::AsoftmaxBackward2((ElemType) m_lambda, m_inputDimension, m_outputDimension, *m_label, Gradient(), X_gradient, *m_inputMagnitude, X, weight,
-                                                        *m_cosTheta, *m_cosThetaQuadratic, *m_sign0);
-                    break;
-                }
-                case 3:
-                {
-                    Matrix<ElemType>::AsoftmaxBackward3((ElemType) m_lambda, m_inputDimension, m_outputDimension, *m_label, Gradient(), X_gradient, *m_inputMagnitude, X, weight,
-                                                        *m_cosThetaQuadratic, *m_cosThetaCubic, *m_sign1, *m_sign2);
-                    break;
-                }
-                case 4:
-                {
-                    Matrix<ElemType>::AsoftmaxBackward4((ElemType) m_lambda, m_inputDimension, m_outputDimension, *m_label, Gradient(), X_gradient, *m_inputMagnitude, X, weight,
-                                                        *m_cosTheta, *m_cosThetaQuadratic, *m_cosThetaCubic, *m_cosThetaQuartic, *m_sign3, *m_sign4);
-                    break;
-                }
-                default:
-                    LogicError("This marginCoefficient is not supported yet.");
+            case 1:
+                break;
+            case 2:
+            {
+                Matrix<ElemType>::AsoftmaxBackward2((ElemType) m_lambda, m_inputDimension, m_outputDimension, *m_label, Gradient(), X_gradient, *m_inputMagnitude, X, weight,
+                                                    *m_cosTheta, *m_cosThetaQuadratic, *m_sign0);
+                break;
+            }
+            case 3:
+            {
+                Matrix<ElemType>::AsoftmaxBackward3((ElemType) m_lambda, m_inputDimension, m_outputDimension, *m_label, Gradient(), X_gradient, *m_inputMagnitude, X, weight,
+                                                    *m_cosThetaQuadratic, *m_cosThetaCubic, *m_sign1, *m_sign2);
+                break;
+            }
+            case 4:
+            {
+                Matrix<ElemType>::AsoftmaxBackward4((ElemType) m_lambda, m_inputDimension, m_outputDimension, *m_label, Gradient(), X_gradient, *m_inputMagnitude, X, weight,
+                                                    *m_cosTheta, *m_cosThetaQuadratic, *m_cosThetaCubic, *m_cosThetaQuartic, *m_sign3, *m_sign4);
+                break;
+            }
+            default:
+                LogicError("This marginCoefficient is not supported yet.");
             }
         }
         else if (2 == inputIndex)
@@ -1095,57 +1142,57 @@ public:
 
         switch (m_marginCoefficient)
         {
-            case 1:
-                break;
-            case 2:
-            {
-                Matrix<ElemType>::ElementWisePower(2, *m_cosTheta, *m_cosThetaQuadratic);
-                break;
-            }
-            case 3:
-            {
-                Matrix<ElemType>::ElementWisePower(2, *m_cosTheta, *m_cosThetaQuadratic);
-                Matrix<ElemType>::ElementWisePower(3, *m_cosTheta, *m_cosThetaCubic);
+        case 1:
+            break;
+        case 2:
+        {
+            Matrix<ElemType>::ElementWisePower(2, *m_cosTheta, *m_cosThetaQuadratic);
+            break;
+        }
+        case 3:
+        {
+            Matrix<ElemType>::ElementWisePower(2, *m_cosTheta, *m_cosThetaQuadratic);
+            Matrix<ElemType>::ElementWisePower(3, *m_cosTheta, *m_cosThetaCubic);
 
-                // m_sign1 = sign(abs(m_cosTheta) - 0.5)
-                m_sign1->AssignAbsOf(*m_cosTheta);
-                m_tempMatrix->SetValue(-0.5); // Only use m_tempMatrix to be a temporary scalar.
-                Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign1);
-                m_sign1->AssignSignOf(*m_sign1);
+            // m_sign1 = sign(abs(m_cosTheta) - 0.5)
+            m_sign1->AssignAbsOf(*m_cosTheta);
+            m_tempMatrix->SetValue(-0.5); // Only use m_tempMatrix to be a temporary scalar.
+            Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign1);
+            m_sign1->AssignSignOf(*m_sign1);
 
-                // m_sign2 = m_sign0 * (1 + m_sign1) - 2
-                m_sign2->SetValue(*m_sign1);
-                m_tempMatrix->SetValue(1.0); // Only use m_tempMatrix to be a temporary scalar.
-                Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign2);
-                m_sign2->ElementMultiplyWith(*m_sign0);
-                m_tempMatrix->SetValue(-2.0); // Only use m_tempMatrix to be a temporary scalar.
-                Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign2);
+            // m_sign2 = m_sign0 * (1 + m_sign1) - 2
+            m_sign2->SetValue(*m_sign1);
+            m_tempMatrix->SetValue(1.0); // Only use m_tempMatrix to be a temporary scalar.
+            Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign2);
+            m_sign2->ElementMultiplyWith(*m_sign0);
+            m_tempMatrix->SetValue(-2.0); // Only use m_tempMatrix to be a temporary scalar.
+            Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign2);
 
-                break;
-            }
-            case 4:
-            {
-                Matrix<ElemType>::ElementWisePower(2, *m_cosTheta, *m_cosThetaQuadratic);
-                Matrix<ElemType>::ElementWisePower(3, *m_cosTheta, *m_cosThetaCubic);
-                Matrix<ElemType>::ElementWisePower(2, *m_cosThetaQuadratic, *m_cosThetaQuartic);
+            break;
+        }
+        case 4:
+        {
+            Matrix<ElemType>::ElementWisePower(2, *m_cosTheta, *m_cosThetaQuadratic);
+            Matrix<ElemType>::ElementWisePower(3, *m_cosTheta, *m_cosThetaCubic);
+            Matrix<ElemType>::ElementWisePower(2, *m_cosThetaQuadratic, *m_cosThetaQuartic);
 
-                // m_sign3 = m_sign0 * sign(2 * m_cosThetaQuadratic - 1)
-                Matrix<ElemType>::Scale(2.0, *m_cosThetaQuadratic, *m_sign3);
-                m_tempMatrix->SetValue(-1.0); // Only use m_tempMatrix to be a temporary scalar.
-                Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign3);
-                m_sign3->AssignSignOf(*m_sign3);
-                m_sign3->ElementMultiplyWith(*m_sign0);
+            // m_sign3 = m_sign0 * sign(2 * m_cosThetaQuadratic - 1)
+            Matrix<ElemType>::Scale(2.0, *m_cosThetaQuadratic, *m_sign3);
+            m_tempMatrix->SetValue(-1.0); // Only use m_tempMatrix to be a temporary scalar.
+            Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign3);
+            m_sign3->AssignSignOf(*m_sign3);
+            m_sign3->ElementMultiplyWith(*m_sign0);
 
-                // m_sign4 = 2 * m_sign0 + m_sign3 - 3
-                Matrix<ElemType>::Scale(2.0, *m_sign0, *m_sign4);
-                Matrix<ElemType>::ScaleAndAdd(1.0, *m_sign3, *m_sign4);
-                m_tempMatrix->SetValue(-3.0); // Only use m_tempMatrix to be a temporary scalar.
-                Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign4);
+            // m_sign4 = 2 * m_sign0 + m_sign3 - 3
+            Matrix<ElemType>::Scale(2.0, *m_sign0, *m_sign4);
+            Matrix<ElemType>::ScaleAndAdd(1.0, *m_sign3, *m_sign4);
+            m_tempMatrix->SetValue(-3.0); // Only use m_tempMatrix to be a temporary scalar.
+            Matrix<ElemType>::ScaleAndAdd(1.0, *m_tempMatrix, *m_sign4);
 
-                break;
-            }
-            default:
-                LogicError("This marginCoefficient is not supported yet.");
+            break;
+        }
+        default:
+            LogicError("This marginCoefficient is not supported yet.");
         }
 
         Matrix<ElemType>::Multiply(weight, false, X, false, Value());
@@ -1158,28 +1205,28 @@ public:
 
             switch (m_marginCoefficient)
             {
-                case 1:
-                    break;
-                case 2:
-                {
-                    Matrix<ElemType>::AsoftmaxForward2((ElemType) m_lambda, m_minibatchSize, m_outputDimension, *m_label, Value(), *m_inputMagnitude,
-                                                       *m_cosThetaQuadratic, *m_sign0);
-                    break;
-                }
-                case 3:
-                {
-                    Matrix<ElemType>::AsoftmaxForward3((ElemType) m_lambda, m_minibatchSize, m_outputDimension, *m_label, Value(), *m_inputMagnitude,
-                                                       *m_cosTheta, *m_cosThetaCubic, *m_sign1, *m_sign2);
-                    break;
-                }
-                case 4:
-                {
-                    Matrix<ElemType>::AsoftmaxForward4((ElemType) m_lambda, m_minibatchSize, m_outputDimension, *m_label, Value(), *m_inputMagnitude,
-                                                       *m_cosThetaQuadratic, *m_cosThetaQuartic, *m_sign3, *m_sign4);
-                    break;
-                }
-                default:
-                    LogicError("This marginCoefficient is not supported yet.");
+            case 1:
+                break;
+            case 2:
+            {
+                Matrix<ElemType>::AsoftmaxForward2((ElemType) m_lambda, m_minibatchSize, m_outputDimension, *m_label, Value(), *m_inputMagnitude,
+                                                   *m_cosThetaQuadratic, *m_sign0);
+                break;
+            }
+            case 3:
+            {
+                Matrix<ElemType>::AsoftmaxForward3((ElemType) m_lambda, m_minibatchSize, m_outputDimension, *m_label, Value(), *m_inputMagnitude,
+                                                   *m_cosTheta, *m_cosThetaCubic, *m_sign1, *m_sign2);
+                break;
+            }
+            case 4:
+            {
+                Matrix<ElemType>::AsoftmaxForward4((ElemType) m_lambda, m_minibatchSize, m_outputDimension, *m_label, Value(), *m_inputMagnitude,
+                                                   *m_cosThetaQuadratic, *m_cosThetaQuartic, *m_sign3, *m_sign4);
+                break;
+            }
+            default:
+                LogicError("This marginCoefficient is not supported yet.");
             }
         }
     }
@@ -1217,33 +1264,33 @@ public:
 
             switch (m_marginCoefficient)
             {
-                case 1:
-                    break;
-                case 2:
-                {
-                    node->m_cosThetaQuadratic->SetValue(*m_cosThetaQuadratic);
-                    node->m_sign0->SetValue(*m_sign0);
-                    break;
-                }
-                case 3:
-                {
-                    node->m_cosThetaQuadratic->SetValue(*m_cosThetaQuadratic);
-                    node->m_cosThetaCubic->SetValue(*m_cosThetaCubic);
-                    node->m_sign1->SetValue(*m_sign1);
-                    node->m_sign2->SetValue(*m_sign2);
-                    break;
-                }
-                case 4:
-                {
-                    node->m_cosThetaQuadratic->SetValue(*m_cosThetaQuadratic);
-                    node->m_cosThetaCubic->SetValue(*m_cosThetaCubic);
-                    node->m_cosThetaQuartic->SetValue(*m_cosThetaQuartic);
-                    node->m_sign3->SetValue(*m_sign3);
-                    node->m_sign4->SetValue(*m_sign4);
-                    break;
-                }
-                default:
-                    LogicError("This marginCoefficient is not supported yet.");
+            case 1:
+                break;
+            case 2:
+            {
+                node->m_cosThetaQuadratic->SetValue(*m_cosThetaQuadratic);
+                node->m_sign0->SetValue(*m_sign0);
+                break;
+            }
+            case 3:
+            {
+                node->m_cosThetaQuadratic->SetValue(*m_cosThetaQuadratic);
+                node->m_cosThetaCubic->SetValue(*m_cosThetaCubic);
+                node->m_sign1->SetValue(*m_sign1);
+                node->m_sign2->SetValue(*m_sign2);
+                break;
+            }
+            case 4:
+            {
+                node->m_cosThetaQuadratic->SetValue(*m_cosThetaQuadratic);
+                node->m_cosThetaCubic->SetValue(*m_cosThetaCubic);
+                node->m_cosThetaQuartic->SetValue(*m_cosThetaQuartic);
+                node->m_sign3->SetValue(*m_sign3);
+                node->m_sign4->SetValue(*m_sign4);
+                break;
+            }
+            default:
+                LogicError("This marginCoefficient is not supported yet.");
             }
 
             node->m_tempMatrix->SetValue(*m_tempMatrix);
@@ -1330,7 +1377,6 @@ public:
         fstream >> m_iter;
     }
 
-
     size_t m_inputDimension;  // n
     size_t m_outputDimension; // k
     size_t m_minibatchSize;   // m
@@ -1405,7 +1451,7 @@ public:
         else if (2 == m_normalizeType)
             Matrix<ElemType>::FeatureNormalizeL2Backprop(Value(), Gradient(), *m_magnitude, *m_temp1, X_gradient);
         else
-            LogicError("NormalizeType = %d not supported yet.", (int)m_normalizeType);
+            LogicError("NormalizeType = %d not supported yet.", (int) m_normalizeType);
     }
 
     virtual void /*ComputationNodeNonLooping::*/ ForwardPropNonLooping() override
@@ -1662,7 +1708,6 @@ public:
         fstream >> m_iter;
     }
 
-
     size_t m_outputDimension; // k
     size_t m_minibatchSize;   // m
     bool m_weightNormalize;
@@ -1723,7 +1768,7 @@ public:
     {
         if (1 == inputIndex)
         {
-            Matrix<ElemType>::ArcLabelAddBackprop(*m_label, (ElemType)m_cosBias, (ElemType)m_sinBias, *m_flag, *m_tempValue, Gradient());
+            Matrix<ElemType>::ArcLabelAddBackprop(*m_label, (ElemType) m_cosBias, (ElemType) m_sinBias, *m_flag, *m_tempValue, Gradient());
 
             FrameRange fr(InputRef(1).GetMBLayout());
             auto X_gradient = InputRef(1).GradientFor(fr);
@@ -1754,7 +1799,7 @@ public:
         if (Environment().IsTraining())
         {
             m_flag->SetValue(0);
-            Matrix<ElemType>::ArcLabelAdd(*m_label, (ElemType)m_threshold, (ElemType)m_bias, (ElemType)m_sinBias, *m_flag, *m_tempValue, Value());
+            Matrix<ElemType>::ArcLabelAdd(*m_label, (ElemType) m_threshold, (ElemType) m_bias, (ElemType) m_sinBias, *m_flag, *m_tempValue, Value());
         }
     }
 
@@ -1783,11 +1828,11 @@ public:
         if (flags & CopyNodeFlags::copyNodeValue)
         {
             auto node = dynamic_pointer_cast<ArcMarginProductNode<ElemType>>(nodeP);
-            node->m_minibatchSize   = m_minibatchSize;
-            node->m_bias            = m_bias;
-            node->m_threshold       = m_threshold;
-            node->m_cosBias         = m_cosBias;
-            node->m_sinBias         = m_sinBias;
+            node->m_minibatchSize = m_minibatchSize;
+            node->m_bias = m_bias;
+            node->m_threshold = m_threshold;
+            node->m_cosBias = m_cosBias;
+            node->m_sinBias = m_sinBias;
             node->m_label->SetValue(*m_label);
             node->m_tempValue->SetValue(*m_tempValue);
             node->m_flag->SetValue(*m_flag);
@@ -1857,12 +1902,15 @@ class CenterLossNode : public ComputationNodeNonLooping /*ComputationNode*/<Elem
 {
     typedef ComputationNodeNonLooping<ElemType> Base;
     UsingComputationNodeMembersBoilerplate;
-    static const std::wstring TypeName() { return L"CenterLoss"; }
+    static const std::wstring TypeName()
+    {
+        return L"CenterLoss";
+    }
 
 public:
-    CenterLossNode(const ScriptableObjects::IConfigRecordPtr configp) :
-        CenterLossNode(configp->Get(L"deviceId"), L"<placeholder>", configp->Get(L"centerLossLambda"), configp->Get(L"centerLossAlpha"),
-                       configp->Get(L"centerLossLabelDim"), configp->Get(L"centerLossNormalize"))
+    CenterLossNode(const ScriptableObjects::IConfigRecordPtr configp)
+        : CenterLossNode(configp->Get(L"deviceId"), L"<placeholder>", configp->Get(L"centerLossLambda"), configp->Get(L"centerLossAlpha"),
+                         configp->Get(L"centerLossLabelDim"), configp->Get(L"centerLossNormalize"))
     {
         // To support legacy models, runCount is optional. Hence, we cannot use NumInputs<>, and must check ourselves in Validation.
         AttachInputsFromConfig(configp, this->GetExpectedNumInputs());
@@ -1875,7 +1923,7 @@ public:
 
     ~CenterLossNode()
     {
-        if(!initFlag)
+        if (!initFlag)
             m_centroids.reset();
     }
 
@@ -1902,13 +1950,13 @@ public:
             auto X_gradient = InputRef(1).GradientFor(InputRef(0).GetMBLayout());
 
             Matrix<ElemType>::Multiply1x1AndWeightedAdd(1.0f / m_minibatchSize, Gradient() /*1x1*/, *m_leftMinusRight, 1.0f, X_gradient);
-            Matrix<ElemType>::Scale((ElemType)m_alpha, *m_leftMinusRight);
+            Matrix<ElemType>::Scale((ElemType) m_alpha, *m_leftMinusRight);
             m_leftMinusRight->RowElementDivideBy(*m_counter);
             m_centroids->ScatterToIndices(*m_leftMinusRight, *m_label, m_featureDim);
 
             if (m_normalize)
             {
-                m_leftMinusRight->AssignVectorNorm2Of(*m_centroids, /*isColumnWise*/true);
+                m_leftMinusRight->AssignVectorNorm2Of(*m_centroids, /*isColumnWise*/ true);
                 m_centroids->RowElementDivideBy(*m_leftMinusRight);
             }
         }
@@ -1924,11 +1972,17 @@ public:
         m_leftMinusRight->AssignDifferenceOf(InputRef(1).ValueFor(fr), *m_centroidsBatch);
         ElemType v = m_leftMinusRight->FrobeniusNorm();
         Value().VerifySize(1, 1);
-        Value().SetValue((ElemType)m_lambda * v * v / m_minibatchSize / (ElemType)2);
+        Value().SetValue((ElemType) m_lambda * v * v / m_minibatchSize / (ElemType) 2);
     }
 
-    virtual bool OutputUsedInComputingInputNodesGradients() const override { return false; }
-    virtual bool InputUsedInComputingInputNodesGradients(size_t /*childIndex*/) const override { return false; }
+    virtual bool OutputUsedInComputingInputNodesGradients() const override
+    {
+        return false;
+    }
+    virtual bool InputUsedInComputingInputNodesGradients(size_t /*childIndex*/) const override
+    {
+        return false;
+    }
 
     virtual void /*ComputationNodeBase::*/ Validate(bool isFinalValidationPass) override
     {
@@ -1997,7 +2051,6 @@ public:
         fstream >> m_lambda >> m_alpha >> m_featureDim >> m_labelDim >> m_normalize;
     }
 
-
     shared_ptr<Matrix<ElemType>> m_leftMinusRight;
     shared_ptr<Matrix<ElemType>> m_centroids;
     shared_ptr<Matrix<ElemType>> m_centroidsBatch;
@@ -2012,7 +2065,6 @@ public:
     size_t m_minibatchSize;
     bool initFlag = true;
 };
-
 
 // -----------------------------------------------------------------------
 // SquareErrorNode (left, right)
@@ -4376,7 +4428,7 @@ public:
         {
             // determine drop-out mask for this minibatch
             auto sliceMask = DataFor(*m_maskOfDropout, fr);
-            sliceMask.SetUniformRandomMask((ElemType)GetDropoutRate(), (ElemType)(1.0 / (1.0 - GetDropoutRate())) /*pre-scaled*/, GetRNGHandle());
+            sliceMask.SetUniformRandomMask((ElemType) GetDropoutRate(), (ElemType)(1.0 / (1.0 - GetDropoutRate())) /*pre-scaled*/, GetRNGHandle());
             // apply dropout mask
             sliceOutputValue.AssignElementProductOf(sliceMask, sliceInput0Value);
             UpdateRngOffset(GetRngOffset() + sliceMask.GetNumElements());
@@ -4421,7 +4473,6 @@ public:
 private:
     shared_ptr<Matrix<ElemType>> m_maskOfDropout;
 };
-
 
 #pragma region GlobalMemoryBlock
 /*
@@ -4593,7 +4644,7 @@ public:
             }
             else if (m_valueGlobalMemoryBlock->m_dimH != m_dims[0] || m_valueGlobalMemoryBlock->m_dimW != m_dims[1])
                 LogicError("GlobalConcatNode: feature layout not matched. Expected HW layout is [%d, %d], but input HW layout is [%d, %d]\n",
-                (int)m_valueGlobalMemoryBlock->m_dimH, (int)m_valueGlobalMemoryBlock->m_dimW, (int)m_dims[0], (int)m_dims[1]);
+                           (int) m_valueGlobalMemoryBlock->m_dimH, (int) m_valueGlobalMemoryBlock->m_dimW, (int) m_dims[0], (int) m_dims[1]);
 
             m_startIndex = m_valueGlobalMemoryBlock->m_index;
             m_numRows = m_dims[0] * m_dims[1] * m_dims[2];
@@ -4611,14 +4662,14 @@ public:
         if (flags & CopyNodeFlags::copyNodeValue)
         {
             auto node = dynamic_pointer_cast<GlobalConcatNode<ElemType>>(nodeP);
-            node->m_blockIndex                = m_blockIndex;
-            node->m_growthRate                = m_growthRate;
-            node->m_segmentIndex              = m_segmentIndex;
-            node->m_segmentNum                = m_segmentNum;
-            node->m_startIndex                = m_startIndex;
-            node->m_numRows                   = m_numRows;
-            node->m_dims                      = m_dims;
-            node->m_valueGlobalMemoryBlock    = m_valueGlobalMemoryBlock;
+            node->m_blockIndex = m_blockIndex;
+            node->m_growthRate = m_growthRate;
+            node->m_segmentIndex = m_segmentIndex;
+            node->m_segmentNum = m_segmentNum;
+            node->m_startIndex = m_startIndex;
+            node->m_numRows = m_numRows;
+            node->m_dims = m_dims;
+            node->m_valueGlobalMemoryBlock = m_valueGlobalMemoryBlock;
             node->m_gradientGlobalMemoryBlock = m_gradientGlobalMemoryBlock;
         }
     }
@@ -5496,4 +5547,6 @@ private:
     bool m_connectGlobalConcat = false;
 };
 
-}}}
+} // namespace CNTK
+} // namespace MSR
+} // namespace Microsoft

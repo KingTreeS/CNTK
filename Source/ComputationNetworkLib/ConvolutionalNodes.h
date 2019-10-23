@@ -4,6 +4,12 @@
 //
 #pragma once
 
+#define __PROFILE__
+
+#ifdef __PROFILE__
+#include "LogPrintInfo.h"
+#endif
+
 #include "Basics.h"
 #include "Globals.h"
 #include "Matrix.h"
@@ -11,6 +17,11 @@
 #include "ConvolutionEngine.h"
 
 namespace Microsoft { namespace MSR { namespace CNTK {
+
+#ifdef __PROFILE__
+std::chrono::time_point<std::chrono::system_clock> convStartTime;
+std::chrono::time_point<std::chrono::system_clock> convEndTime;
+#endif
 
 // -----------------------------------------------------------------------
 // ConvolutionNodeBase
@@ -520,6 +531,10 @@ public:
 public:
     void ForwardProp(const FrameRange& fr) override
     {
+#ifdef __PROFILE__
+        convStartTime = std::chrono::system_clock::now();
+#endif
+
         Matrix<ElemType> sliceOutputValue = ValueFor(fr);
         const Matrix<ElemType>& input0 = InputRef(0).ValueAsMatrix();
         Matrix<ElemType> sliceInput1Value = InputRef(1).ValueFor(fr);
@@ -532,6 +547,11 @@ public:
             sliceOutputValue.SetValue(0);
             m_convEng->BackwardData(sliceInput1Value, input0, sliceOutputValue, /*accumulateGradient =*/ true, *m_tempMatrixForward);
         }
+
+#ifdef __PROFILE__
+        convEndTime = std::chrono::system_clock::now();
+        Chashu::convTime += (std::chrono::duration<double>(convEndTime - convStartTime)).count();
+#endif
     }
 
     void BackpropTo(const size_t inputIndex, const FrameRange& fr) override

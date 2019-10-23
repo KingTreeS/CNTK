@@ -9,6 +9,10 @@
 #define _CRT_SECURE_NO_WARNINGS // "secure" CRT not available on all platforms  --add this at the top of all CPP files that give "function or variable may be unsafe" warnings
 #define __PROFILE__
 
+#ifdef __PROFILE__
+#include "LogPrintInfo.h"
+#endif
+
 #include <cmath>
 const double Pi = acos(-1.0);
 
@@ -62,6 +66,13 @@ double aggregateTime = 0.0;
 double updateTime = 0.0;
 std::chrono::time_point<std::chrono::system_clock> startTime;
 std::chrono::time_point<std::chrono::system_clock> endTime;
+
+std::chrono::time_point<std::chrono::system_clock> aggStartTime;
+std::chrono::time_point<std::chrono::system_clock> aggEndTime;
+#endif
+
+#ifdef __PROFILE__
+static size_t iterCnt = 0;
 #endif
 
 // =======================================================================
@@ -361,7 +372,7 @@ void SGD<ElemType>::TrainOrAdaptModel(int startEpoch, ComputationNetworkPtr net,
     auto& learnableNodes = net->LearnableParameterNodes(criterionNodes[0]);
     list<Matrix<ElemType>> smoothedGradients;
     vector<double> smoothedCounts; // currently used by FSAdaGradUpdate()
-	map<wstring, double> optimizerInfo;
+    map<wstring, double> optimizerInfo;
     size_t numParameters = 0;
 
     vector<wstring> nodesToUpdateDescriptions; // for logging only
@@ -382,7 +393,6 @@ void SGD<ElemType>::TrainOrAdaptModel(int startEpoch, ComputationNetworkPtr net,
         }
     }
 
-
     size_t bufferSize = 0;
     for (auto nodeIter = learnableNodes.begin(); nodeIter != learnableNodes.end(); nodeIter++)
     {
@@ -392,11 +402,10 @@ void SGD<ElemType>::TrainOrAdaptModel(int startEpoch, ComputationNetworkPtr net,
             auto paramsNode = dynamic_pointer_cast<LearnableParameter<ElemType>>(node);
             auto& paramsValues = paramsNode->Value();
             bufferSize = std::max(paramsValues.GetNumRows() * paramsValues.GetNumCols() * Globals::GetProcessNum(), bufferSize);
-            bufferSize = std::max(paramsValues.GetNumRows() * (size_t)m_mbSize[0], bufferSize);
-            bufferSize = std::max(paramsValues.GetNumCols() * (size_t)m_mbSize[0] * Globals::GetProcessNum(), bufferSize);
+            bufferSize = std::max(paramsValues.GetNumRows() * (size_t) m_mbSize[0], bufferSize);
+            bufferSize = std::max(paramsValues.GetNumCols() * (size_t) m_mbSize[0] * Globals::GetProcessNum(), bufferSize);
         }
     }
-
 
     size_t numNeedsGradient = 0;
     for (let node : net->GetEvalOrder(criterionNodes[0]))
@@ -984,7 +993,7 @@ void SGD<ElemType>::TrainOrAdaptModel(int startEpoch, ComputationNetworkPtr net,
                     chosenMinibatchSize);
                 auto modelName = GetModelNameForEpoch(i);
                 if (m_traceLevel > 0)
-                    LOGPRINTF(stderr, "SGD: Saving checkpoint model '%ls'\n", modelName.c_str());                
+                    LOGPRINTF(stderr, "SGD: Saving checkpoint model '%ls'\n", modelName.c_str());
                 net->Save(modelName);
                 if (!m_keepCheckPointFiles)
                 {
@@ -1256,7 +1265,6 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         startTime = std::chrono::system_clock::now();
 #endif
 
-
         auto profMinibatch = ProfilerTimeBegin();
 
         // get minibatch
@@ -1325,7 +1333,6 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                                               dynamic_pointer_cast<ComputationNode<ElemType>>(labelNodes[0])->Value());
             }
 
-
 #ifdef __PROFILE__
             if (m_lrapiInfo.iter != 0)
             {
@@ -1337,16 +1344,76 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 #ifdef __PROFILE__
             if (m_lrapiInfo.sgdTraceLevel > 0 && m_lrapiInfo.iter % m_lrapiInfo.numItersToShowLR == 0 && m_lrapiInfo.iter != 0)
             {
-                fprintf(stderr, "Iteration [%d-%d]: prepare time = %.8gs\n", (int)(m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int)m_lrapiInfo.iter, prepareTime);
-                fprintf(stderr, "Iteration [%d-%d]: forward time = %.8gs\n", (int)(m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int)m_lrapiInfo.iter, forwardTime);
-                fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int)(m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int)m_lrapiInfo.iter, backwardTime);
-                fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int)(m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int)m_lrapiInfo.iter, aggregateTime);
-                fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int)(m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int)m_lrapiInfo.iter, updateTime);
+                fprintf(stderr, "Iteration [%d-%d]: prepare time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, prepareTime);
+
+                fprintf(stderr, "Iteration [%d-%d]: forward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, forwardTime);
+                fprintf(stderr, "Iteration [%d-%d]: conv time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::convTime);
+                fprintf(stderr, "Iteration [%d-%d]: gather dist label time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnGatherDistLabelTime);
+                fprintf(stderr, "Iteration [%d-%d]: cuda memcpy and mpi allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdCudaMemcpyAndMPIAllGatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: mpi iallgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIIallgatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: mpi allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIAllGatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: nccl allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdNCCLAllGatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: nccl sync time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdNCCLSyncTime);
+                fprintf(stderr, "Iteration [%d-%d]: mpi wait time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIWaitTime);
+                fprintf(stderr, "Iteration [%d-%d]: matrix multiply time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnMatrixMultiplyTime);
+                fprintf(stderr, "Iteration [%d-%d]: dist label add time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnDistLabelAddTime);
+                fprintf(stderr, "Iteration [%d-%d]: matrix scale time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnMatrixScaleTime);
+                
+				fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
+                
+				fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
+                fprintf(stderr, "Iteration [%d-%d]: lazily form the list of smoothedGradients to exchange time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggFormListOfSmoothedGradTime);
+                fprintf(stderr, "Iteration [%d-%d]: hoist the criterion into CPU space for all-reduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggHoistCriterionToCPUAllreduceTime);
+                fprintf(stderr, "Iteration [%d-%d]: copy all values to be aggregated into the header time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyAllValToBeAggregatedToHeaderTime);
+                fprintf(stderr, "Iteration [%d-%d]: Async gradient aggregation wait time time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggAsyncTime);
+                fprintf(stderr, "Iteration [%d-%d]: Swap the grad header contents with the buffered grad header time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggSwapTime);
+                fprintf(stderr, "Iteration [%d-%d]: Copy all gradient data into a single contiguous buffer time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyGradDataToBufferTime);
+                fprintf(stderr, "Iteration [%d-%d]: Initiate receive of the header on the main node time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggInitRecvHeaderAndSendNodes);
+                fprintf(stderr, "Iteration [%d-%d]: aggregate nccl allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggNCCLAllReduceTime);
+                fprintf(stderr, "Iteration [%d-%d]: On the main node wait for the headers to arrive and aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMainNodeWaitAndAggTime);
+                fprintf(stderr, "Iteration [%d-%d]: Broadcast the aggregated header to all nodes time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIBcastTime);
+                fprintf(stderr, "Iteration [%d-%d]: aggregate nccl sync time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggNCCLSyncTime);
+                fprintf(stderr, "Iteration [%d-%d]: Copy data back to the packed gradients from the continous buffer time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyDataBackToGradTime);
+                fprintf(stderr, "Iteration [%d-%d]: Wait for completion of the async send requests time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIWaitTime);
+
+                
+				fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, updateTime);
                 prepareTime = 0.0;
                 forwardTime = 0.0;
                 backwardTime = 0.0;
                 aggregateTime = 0.0;
                 updateTime = 0.0;
+
+                // Detail Info
+                Chashu::convTime = 0.0;
+
+                Chashu::tnGatherDistLabelTime = 0.0;
+                Chashu::tnMatrixMultiplyTime = 0.0;
+                Chashu::tnDistLabelAddTime = 0.0;
+                Chashu::tnMatrixScaleTime = 0.0;
+
+                Chashu::sdCudaMemcpyAndMPIAllGatherTime = 0.0;
+                Chashu::sdMPIIallgatherTime = 0.0;
+                Chashu::sdMPIAllGatherTime = 0.0;
+                Chashu::sdNCCLAllGatherTime = 0.0;
+                Chashu::sdNCCLSyncTime = 0.0;
+                Chashu::sdMPIWaitTime = 0.0;
+
+                Chashu::aggFormListOfSmoothedGradTime = 0.0;
+                Chashu::aggHoistCriterionToCPUAllreduceTime = 0.0;
+                Chashu::aggCopyAllValToBeAggregatedToHeaderTime = 0.0;
+                Chashu::aggAsyncTime = 0.0;
+                Chashu::aggSwapTime = 0.0;
+                Chashu::aggCopyGradDataToBufferTime = 0.0;
+                Chashu::aggInitRecvHeaderAndSendNodes = 0.0;
+                Chashu::aggNCCLAllReduceTime = 0.0;
+                Chashu::aggMainNodeWaitAndAggTime = 0.0;
+                Chashu::aggMPIBcastTime = 0.0;
+                Chashu::aggNCCLSyncTime = 0.0;
+                Chashu::aggCopyDataBackToGradTime = 0.0;
+                Chashu::aggMPIWaitTime = 0.0;
+
+
             }
 #endif
 
@@ -1382,7 +1449,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
                 if (learnRatePerSample < 0)
                 {
-                    fprintf(stderr, "Set learning rate per sample equal to min_learning, because Iteration %d: learning rate per sample = %.8g\n", (int)m_lrapiInfo.iter, learnRatePerSample);
+                    fprintf(stderr, "Set learning rate per sample equal to min_learning, because Iteration %d: learning rate per sample = %.8g\n", (int) m_lrapiInfo.iter, learnRatePerSample);
                     learnRatePerSample = m_minLearnRate;
                 }
             }
@@ -1405,7 +1472,6 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 // forward prop for evaluate eval nodes
                 // ===========================================================
 
-
 #ifdef __PROFILE__
                 startTime = std::chrono::system_clock::now();
 #endif
@@ -1417,11 +1483,9 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 forwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
 #endif
 
-
                 // ===========================================================
                 // backprop
                 // ===========================================================
-
 
 #ifdef __PROFILE__
                 startTime = std::chrono::system_clock::now();
@@ -1432,7 +1496,6 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 endTime = std::chrono::system_clock::now();
                 backwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
 #endif
-
 
                 // house-keeping for sub-minibatching
                 if (actualNumSubminibatches > 1)
@@ -1457,10 +1520,9 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         // for momentum/clipping/regularization/etc., as well as for progress and statistics, we should only count frames that are not gaps
         // #samples according to the default dynamic axis, for use with criterion nodes that do not have an MBLayout
         size_t numSamplesWithLabelOfNetwork = wasDataRead ? net->GetNumSamplesWithLabelOfNetwork(actualMBSize) : 0; // (0 for empty MB)
-        // Note: All accumulation into an EpochCriterion uses 'numSamplesWithLabelOfNetwork' as the generic,
-        // fallback minibatch size. If that is 0, then nodes are considered containing zero samples,
-        // independent of their actual content (which is considered outdated).
-
+                                                                                                                    // Note: All accumulation into an EpochCriterion uses 'numSamplesWithLabelOfNetwork' as the generic,
+                                                                                                                    // fallback minibatch size. If that is 0, then nodes are considered containing zero samples,
+                                                                                                                    // independent of their actual content (which is considered outdated).
 
 #ifdef __PROFILE__
         startTime = std::chrono::system_clock::now();
@@ -1472,6 +1534,10 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
         if (!useGradientAggregation)
         {
+#ifdef __PROFILE__
+            if (iterCnt++ % 100 == 0)
+                LOGPRINTF(stderr, "Aggregation: Not use gradient aggregation.")
+#endif
             // accumulate criterion values (objective, eval)
             assert(wasDataRead || numSamplesWithLabelOfNetwork == 0);
             // criteria are in Value()(0,0), we accumulate into another 1x1 Matrix (to avoid having to pull the values off the GPU)
@@ -1481,6 +1547,14 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         }
         else
         {
+#ifdef __PROFILE__
+            if (iterCnt++ % 100 == 0)
+				LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.")
+#endif
+
+#ifdef __PROFILE__
+            aggStartTime = std::chrono::system_clock::now();
+#endif
             // distributed gradient aggregation
             if (learnParamsGradients.size() == 0)
             {
@@ -1505,11 +1579,26 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     }
                 }
             }
+#ifdef __PROFILE__
+            aggEndTime = std::chrono::system_clock::now();
+            Chashu::aggFormListOfSmoothedGradTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
+#endif
+
+#ifdef __PROFILE__
+            aggStartTime = std::chrono::system_clock::now();
+#endif
             // hoist the criterion into CPU space for all-reduce
             localEpochCriterion.Assign(0, numSamplesWithLabelOfNetwork);
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 localEpochEvalErrors.Assign(i, numSamplesWithLabelOfNetwork);
+#ifdef __PROFILE__
+            aggEndTime = std::chrono::system_clock::now();
+            Chashu::aggHoistCriterionToCPUAllreduceTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
+#endif
 
+#ifdef __PROFILE__
+            aggStartTime = std::chrono::system_clock::now();
+#endif
             // copy all values to be aggregated into the header
             m_gradHeader->numSamples = aggregateNumSamples;
             m_gradHeader->criterion = localEpochCriterion.GetCriterion(0).first;
@@ -1517,6 +1606,11 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             assert(m_gradHeader->numSamplesWithLabel == aggregateNumSamplesWithLabel);
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 m_gradHeader->evalErrors[i] = localEpochEvalErrors.GetCriterion(i);
+#ifdef __PROFILE__
+            aggEndTime = std::chrono::system_clock::now();
+            Chashu::aggCopyAllValToBeAggregatedToHeaderTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
+#endif
+
             // aggregate
             m_gradHeader->numEvalNode = evaluationNodes.size(); // TODO: rename numEvalNode (plural)
             bool samplesProcessed = m_distGradAgg->AggregateGradients(learnParamsGradients, m_gradHeader.get(), isFirstMinibatch);
@@ -1571,7 +1665,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (auto nodeIter = learnableNodes.begin(); nodeIter != learnableNodes.end(); nodeIter++, smoothedGradientIter++, smoothedCountIter++)
             {
                 ComputationNodeBasePtr node = *nodeIter;
-				++(*smoothedCountIter); // increase update_step
+                ++(*smoothedCountIter); // increase update_step
                 if (node->IsParameterUpdateRequired())
                 {
 #ifdef _DEBUG
@@ -1599,8 +1693,8 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             }
         }
 
-		// update additional optimizer information
-		UpdateAdditionalOptimizerInfo();
+        // update additional optimizer information
+        UpdateAdditionalOptimizerInfo();
 
         // aggregation by model averaging or block momentum
         if (useModelAggregation)
@@ -1639,7 +1733,6 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         endTime = std::chrono::system_clock::now();
         updateTime += (std::chrono::duration<double>(endTime - startTime)).count();
 #endif
-
 
         ProfilerTimeEnd(profWeights, profilerEvtMainWeights);
         auto profPost = ProfilerTimeBegin();
@@ -1815,7 +1908,6 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         // TODO: move the two-forward-pass support out of the reader.
         AttemptUtteranceDerivativeFeatures(net, trainSetDataReader, featureNodes, inputMatrices);
 
-
         profiler.NextSample();
         isFirstMinibatch = false;
 
@@ -1901,11 +1993,11 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             localEpochEvalErrors, ContainsAccumulatedResult, m_packThresholdSizeInBytes);
     }
 
-	//// for DEBUG
-	//for (auto learnableNode : learnableNodes)
-	//{
-	//	learnableNode->PrintSelf(true);
-	//}
+    //// for DEBUG
+    //for (auto learnableNode : learnableNodes)
+    //{
+    //	learnableNode->PrintSelf(true);
+    //}
 
     return numMBsRun;
 }
@@ -2506,7 +2598,7 @@ void SGD<ElemType>::InitDistGradAgg(int numEvalNodes, int numGradientBits, int d
         else
             m_distGradAgg = std::make_shared<SimpleDistGradAggregator<ElemType>>(m_mpi, m_bufferedAsyncGradientAggregation, deviceId, m_syncStatsTrace, m_packThresholdSizeInBytes);
     }
-    Globals::SetDistGradAggPtr((void*)m_distGradAgg.get());
+    Globals::SetDistGradAggPtr((void*) m_distGradAgg.get());
 
     m_gradHeader.reset(DistGradHeader::Create(numEvalNodes), [](DistGradHeader* ptr) { DistGradHeader::Destroy(ptr); });
 }
@@ -2645,58 +2737,58 @@ void SGD<ElemType>::UpdateWeights(Matrix<ElemType>& functionValues, Matrix<ElemT
 
         auto learningRate = learnRatePerSample * actualMBSize;
         Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
-        smoothedGradientValues.RmsPropUpdate(gradientValues, functionValues, learningRate, momentum, (ElemType) m_rpi.gamma, (!disableMomentumUnitGain), (ElemType)m_epsilon);
+        smoothedGradientValues.RmsPropUpdate(gradientValues, functionValues, learningRate, momentum, (ElemType) m_rpi.gamma, (!disableMomentumUnitGain), (ElemType) m_epsilon);
 #else
 
-		smoothedGradientValues.RmsPropUpdate(gradientValues, functionValues, learnRatePerSample, momentum, (ElemType) m_rpi.gamma, (!disableMomentumUnitGain), (ElemType)m_epsilon);
-#endif    
-	}
+        smoothedGradientValues.RmsPropUpdate(gradientValues, functionValues, learnRatePerSample, momentum, (ElemType) m_rpi.gamma, (!disableMomentumUnitGain), (ElemType) m_epsilon);
+#endif
+    }
     else if (adpType == GradientsUpdateType::Adam)
-	{
+    {
         const auto unitGainFactor = ElemType(disableMomentumUnitGain ? 1.0 : (1.0 - m_adamInfo.beta1));
-		double beta1Pow = m_additionalOptimizerInfo.at(L"beta1_pow");
-		double beta2Pow = m_additionalOptimizerInfo.at(L"beta2_pow");
+        double beta1Pow = m_additionalOptimizerInfo.at(L"beta1_pow");
+        double beta2Pow = m_additionalOptimizerInfo.at(L"beta2_pow");
 
 #ifdef USE_MEAN_GRADIENT
         auto learningRate = learnRatePerSample * actualMBSize;
-		Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
+        Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
         smoothedGradientValues.AdamUpdate(gradientValues, functionValues, beta1Pow, beta2Pow, learningRate, m_adamInfo.beta1, m_adamInfo.beta2, m_epsilon, unitGainFactor);
 #else
         smoothedGradientValues.AdamUpdate(gradientValues, functionValues, beta1Pow, beta2Pow, learnRatePerSample, m_adamInfo.beta1, m_adamInfo.beta2, m_epsilon, unitGainFactor);
 #endif
-	}
-	else if (adpType == GradientsUpdateType::AdaMax)
-	{
-		const auto unitGainFactor = ElemType(disableMomentumUnitGain ? 1.0 : (1.0 - m_adamInfo.beta1));
-		double beta1Pow = m_additionalOptimizerInfo.at(L"beta1_pow");
+    }
+    else if (adpType == GradientsUpdateType::AdaMax)
+    {
+        const auto unitGainFactor = ElemType(disableMomentumUnitGain ? 1.0 : (1.0 - m_adamInfo.beta1));
+        double beta1Pow = m_additionalOptimizerInfo.at(L"beta1_pow");
 
 #ifdef USE_MEAN_GRADIENT
-		auto learningRate = learnRatePerSample * actualMBSize;
-		Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
-		smoothedGradientValues.AdaMaxUpdate(gradientValues, functionValues, beta1Pow, learningRate, m_adamInfo.beta1, m_adamInfo.beta2, unitGainFactor, m_epsilon);
+        auto learningRate = learnRatePerSample * actualMBSize;
+        Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
+        smoothedGradientValues.AdaMaxUpdate(gradientValues, functionValues, beta1Pow, learningRate, m_adamInfo.beta1, m_adamInfo.beta2, unitGainFactor, m_epsilon);
 #else
-		smoothedGradientValues.AdaMaxUpdate(gradientValues, functionValues, beta1Pow, learnRatePerSample, m_adaMaxInfo.beta1, m_adaMaxInfo.beta2, unitGainFactor, m_epsilon);
+        smoothedGradientValues.AdaMaxUpdate(gradientValues, functionValues, beta1Pow, learnRatePerSample, m_adaMaxInfo.beta1, m_adaMaxInfo.beta2, unitGainFactor, m_epsilon);
 #endif
-	}
-	else if (adpType == GradientsUpdateType::AdaBound)
-	{
-		const auto unitGainFactor = static_cast<ElemType>(disableMomentumUnitGain ? 1.0 : (1.0 - m_adamInfo.beta1));
-		const double beta1Pow = m_additionalOptimizerInfo.at(L"beta1_pow");
-		const double beta2Pow = m_additionalOptimizerInfo.at(L"beta2_pow");
-		double finalLr = 0;
-		if (m_lrapiInfo.adjustType != AdjustType::None)
-			finalLr = m_adaBoundInfo.final_lr * (learnRatePerSample * actualMBSize) / m_lrapiInfo.baseLR;
-		else
-			finalLr = learnRatePerSample * actualMBSize;
+    }
+    else if (adpType == GradientsUpdateType::AdaBound)
+    {
+        const auto unitGainFactor = static_cast<ElemType>(disableMomentumUnitGain ? 1.0 : (1.0 - m_adamInfo.beta1));
+        const double beta1Pow = m_additionalOptimizerInfo.at(L"beta1_pow");
+        const double beta2Pow = m_additionalOptimizerInfo.at(L"beta2_pow");
+        double finalLr = 0;
+        if (m_lrapiInfo.adjustType != AdjustType::None)
+            finalLr = m_adaBoundInfo.final_lr * (learnRatePerSample * actualMBSize) / m_lrapiInfo.baseLR;
+        else
+            finalLr = learnRatePerSample * actualMBSize;
 
 #ifdef USE_MEAN_GRADIENT
-		auto learningRate = learnRatePerSample * actualMBSize;
-		Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
-		smoothedGradientValues.AdaBoundUpdate(gradientValues, functionValues, beta1Pow, beta2Pow, learningRate, m_adamInfo.beta1, m_adamInfo.beta2, m_epsilon, m_adaBoundInfo.gamma, finalLr, m_adaBoundInfo.amsBound, smoothedCount, unitGainFactor);
+        auto learningRate = learnRatePerSample * actualMBSize;
+        Matrix<ElemType>::Scale((ElemType)(1. / actualMBSize), gradientValues);
+        smoothedGradientValues.AdaBoundUpdate(gradientValues, functionValues, beta1Pow, beta2Pow, learningRate, m_adamInfo.beta1, m_adamInfo.beta2, m_epsilon, m_adaBoundInfo.gamma, finalLr, m_adaBoundInfo.amsBound, smoothedCount, unitGainFactor);
 #else
-		smoothedGradientValues.AdaBoundUpdate(gradientValues, functionValues, beta1Pow, beta2Pow, learnRatePerSample, m_adamInfo.beta1, m_adamInfo.beta2, m_epsilon, m_adaBoundInfo.gamma, finalLr / actualMBSize, m_adaBoundInfo.amsBound, smoothedCount, unitGainFactor);
+        smoothedGradientValues.AdaBoundUpdate(gradientValues, functionValues, beta1Pow, beta2Pow, learnRatePerSample, m_adamInfo.beta1, m_adamInfo.beta2, m_epsilon, m_adaBoundInfo.gamma, finalLr / actualMBSize, m_adaBoundInfo.amsBound, smoothedCount, unitGainFactor);
 #endif
-	}
+    }
 
     if (noiseStd > 0)
     {
@@ -2782,16 +2874,16 @@ void SGD<ElemType>::SaveCheckPointInfo(const size_t epoch, const size_t totalSam
 
             fstream.PutMarker(FileMarker::fileMarkerEndSection, L"EGradient");
 
-			if (!m_additionalOptimizerInfo.empty())
-			{
-				fstream.PutMarker(FileMarker::fileMarkerBeginSection, L"BAdditionalOptimizerInfo");
-				fstream << m_additionalOptimizerInfo.size();
-				for (auto additionalItem = m_additionalOptimizerInfo.begin(); additionalItem != m_additionalOptimizerInfo.end(); ++additionalItem)
-				{
-					fstream << additionalItem->first << additionalItem->second;
-				}
-				fstream.PutMarker(FileMarker::fileMarkerEndSection, L"EAdditionalOptimizerInfo");
-			}
+            if (!m_additionalOptimizerInfo.empty())
+            {
+                fstream.PutMarker(FileMarker::fileMarkerBeginSection, L"BAdditionalOptimizerInfo");
+                fstream << m_additionalOptimizerInfo.size();
+                for (auto additionalItem = m_additionalOptimizerInfo.begin(); additionalItem != m_additionalOptimizerInfo.end(); ++additionalItem)
+                {
+                    fstream << additionalItem->first << additionalItem->second;
+                }
+                fstream.PutMarker(FileMarker::fileMarkerEndSection, L"EAdditionalOptimizerInfo");
+            }
 
             fstream.PutMarker(FileMarker::fileMarkerEndSection, L"BCount");
 
@@ -2837,7 +2929,7 @@ bool SGD<ElemType>::TryLoadCheckPointInfo(const size_t epochNumber,
     // This means a user wanted to continue training from an older model, but that model had no checkpoint info anymore.
     // This is valid, we just don't get the features that require previous models, such as LR or MBSize control.
     wstring checkPointFileName = GetCheckPointFileNameForEpoch(int(epochNumber));
-    if (!fexists(checkPointFileName.c_str())) 
+    if (!fexists(checkPointFileName.c_str()))
         checkPointFileName = GetCheckPointFileName(int(epochNumber));
 
     if (!fexists(checkPointFileName.c_str()))
@@ -2906,20 +2998,20 @@ void SGD<ElemType>::LoadCheckPointInfo(const size_t epochNumber,
     }
     fstream.GetMarker(FileMarker::fileMarkerEndSection, L"EGradient");
 
-	if (fstream.TryGetMarker(FileMarker::fileMarkerBeginSection, L"BAdditionalOptimizerInfo"))
-	{
-		size_t numAdditionalItem;
-		fstream >> numAdditionalItem;
-		for (size_t i = 0; i < numAdditionalItem; ++i)
-		{
-			wstring name;
-			double value;
-			fstream >> name;
-			fstream >> value;
-			m_additionalOptimizerInfo[name] = value;
-		}
-		fstream.GetMarker(FileMarker::fileMarkerEndSection, L"EAdditionalOptimizerInfo");
-	}
+    if (fstream.TryGetMarker(FileMarker::fileMarkerBeginSection, L"BAdditionalOptimizerInfo"))
+    {
+        size_t numAdditionalItem;
+        fstream >> numAdditionalItem;
+        for (size_t i = 0; i < numAdditionalItem; ++i)
+        {
+            wstring name;
+            double value;
+            fstream >> name;
+            fstream >> value;
+            m_additionalOptimizerInfo[name] = value;
+        }
+        fstream.GetMarker(FileMarker::fileMarkerEndSection, L"EAdditionalOptimizerInfo");
+    }
 
     if (fstream.TryGetMarker(FileMarker::fileMarkerBeginSection, L"BCount"))
     {
@@ -2983,7 +3075,7 @@ wstring SGD<ElemType>::GetModelNameForEpoch(const int epoch, bool bLastModel) co
     else
     {
         wstring w = msra::strfun::wstrprintf(L"%ls.%d", m_modelPath.c_str(), (int) epoch1Base);
-        return msra::strfun::wstrprintf(L"%ls.%d", (w + L"/"+ m_modelName).c_str(), (int)epoch1Base);
+        return msra::strfun::wstrprintf(L"%ls.%d", (w + L"/" + m_modelName).c_str(), (int) epoch1Base);
     }
 }
 
@@ -2998,10 +3090,9 @@ wstring SGD<ElemType>::GetModelName(const int epoch, bool bLastModel) const
     }
     else
     {
-        return msra::strfun::wstrprintf(L"%ls.%d", m_modelPath.c_str(), (int)epoch1Base);
+        return msra::strfun::wstrprintf(L"%ls.%d", m_modelPath.c_str(), (int) epoch1Base);
     }
 }
-
 
 template <class ElemType>
 void SGD<ElemType>::AggregateDistParams(const std::list<ComputationNodeBasePtr>& learnableNodes)
@@ -3034,7 +3125,6 @@ void SGD<ElemType>::ReleaseDistParams(const std::list<ComputationNodeBasePtr>& l
         }
     }
 }
-
 
 // return -1 if nothing exists
 template <class ElemType> // TODO: needed?
@@ -3197,20 +3287,20 @@ static AdaptationRegType ParseAdaptationRegType(const wstring& s)
 
 static GradientsUpdateType ParseGradUpdateType(const wstring& s)
 {
-	if (EqualCI(s, L"") || EqualCI(s, L"none"))
-		return GradientsUpdateType::None;
-	else if (EqualCI(s, L"adagrad"))
-		return GradientsUpdateType::AdaGrad;
-	else if (EqualCI(s, L"rmsProp"))
-		return GradientsUpdateType::RmsProp;
-	else if (EqualCI(s, L"fsAdagrad"))
-		return GradientsUpdateType::FSAdaGrad;
-	else if (EqualCI(s, L"adam"))
-		return GradientsUpdateType::Adam;
-	else if (EqualCI(s, L"adaMax"))
-		return GradientsUpdateType::AdaMax;
-	else if (EqualCI(s, L"adaBound"))
-		return GradientsUpdateType::AdaBound;
+    if (EqualCI(s, L"") || EqualCI(s, L"none"))
+        return GradientsUpdateType::None;
+    else if (EqualCI(s, L"adagrad"))
+        return GradientsUpdateType::AdaGrad;
+    else if (EqualCI(s, L"rmsProp"))
+        return GradientsUpdateType::RmsProp;
+    else if (EqualCI(s, L"fsAdagrad"))
+        return GradientsUpdateType::FSAdaGrad;
+    else if (EqualCI(s, L"adam"))
+        return GradientsUpdateType::Adam;
+    else if (EqualCI(s, L"adaMax"))
+        return GradientsUpdateType::AdaMax;
+    else if (EqualCI(s, L"adaBound"))
+        return GradientsUpdateType::AdaBound;
     // legacy, deprecated
     else if (EqualCI(s, L"normal") || EqualCI(s, L"simple"))
         return GradientsUpdateType::None;
@@ -3302,7 +3392,7 @@ SGDParams::SGDParams(const ConfigRecordType& configSGD, size_t sizeofElemType)
     if (EqualCI(adjustType, L"none") || EqualCI(adjustType, L"None"))
         m_lrapiInfo.adjustType = AdjustType::None;
     else if (EqualCI(adjustType, L"poly") || EqualCI(adjustType, L"Poly"))
-		m_lrapiInfo.adjustType = AdjustType::Poly;
+        m_lrapiInfo.adjustType = AdjustType::Poly;
     else if (EqualCI(adjustType, L"inv") || EqualCI(adjustType, L"Inv"))
         m_lrapiInfo.adjustType = AdjustType::Inv;
     else if (EqualCI(adjustType, L"exp") || EqualCI(adjustType, L"Exp"))
@@ -3444,38 +3534,37 @@ SGDParams::SGDParams(const ConfigRecordType& configSGD, size_t sizeofElemType)
     m_gradType.varianceTimeConstant = configSGD(L"varianceTimeConstant", 2 * 3600 * 100); // default originates from 2h of speech
     m_gradType.targetAdagradAvDenom = configSGD(L"fsAdagradTargetAvDenom", 1.0);          // TODO: deprecated parameter kept for back compat (set to 0.0025 inconjunction with reenabling the static bug)
 
-	// epsilon
-	m_epsilon = configSGD(L"epsilon", 1.0);
-    
-	// extract RMSProp parameters from config, if they exist. Default to reasonable values.
+    // epsilon
+    m_epsilon = configSGD(L"epsilon", 1.0);
+
+    // extract RMSProp parameters from config, if they exist. Default to reasonable values.
     m_rpi.dec = configSGD(L"rms_wgt_dec", 0.75);
     m_rpi.inc = configSGD(L"rms_wgt_inc", 1.2);
     m_rpi.min = configSGD(L"rms_wgt_min", 0.1);
     m_rpi.max = configSGD(L"rms_wgt_max", 10.0);
     m_rpi.gamma = configSGD(L"rms_gamma", 0.99);
 
-	if (m_gradType.type == GradientsUpdateType::Adam)
-	{
-		// extract Adam parameters from config, if they exist. Default to reasonable values.
-		m_adamInfo.beta1 = configSGD(L"adam_beta1", 0.9);
-		m_adamInfo.beta2 = configSGD(L"adam_beta2", 0.999);
-	}
-	else if (m_gradType.type == GradientsUpdateType::AdaMax)
-	{
-		// extract AdaMax parameters from config, it they exist. Default to reasonable values.
-		m_adamInfo.beta1 = configSGD(L"adamax_beta1", 0.9);
-		m_adamInfo.beta2 = configSGD(L"adamax_beta2", 0.999);
-	}
-	else if (m_gradType.type == GradientsUpdateType::AdaBound)
-	{
-		// extract AdaBound parameters from config, if they exist. Default to reasonable values.
-		m_adamInfo.beta1 = configSGD(L"adabound_beta1", 0.9);
-		m_adamInfo.beta2 = configSGD(L"adabound_beta2", 0.999);
-		m_adaBoundInfo.gamma = configSGD(L"adabound_gamma", 1 - m_adamInfo.beta2);
-		m_adaBoundInfo.final_lr = configSGD(L"adabound_final_lr", 0.1);
-		m_adaBoundInfo.amsBound = configSGD(L"adabound_using_amsbound", false);
-	}
-
+    if (m_gradType.type == GradientsUpdateType::Adam)
+    {
+        // extract Adam parameters from config, if they exist. Default to reasonable values.
+        m_adamInfo.beta1 = configSGD(L"adam_beta1", 0.9);
+        m_adamInfo.beta2 = configSGD(L"adam_beta2", 0.999);
+    }
+    else if (m_gradType.type == GradientsUpdateType::AdaMax)
+    {
+        // extract AdaMax parameters from config, it they exist. Default to reasonable values.
+        m_adamInfo.beta1 = configSGD(L"adamax_beta1", 0.9);
+        m_adamInfo.beta2 = configSGD(L"adamax_beta2", 0.999);
+    }
+    else if (m_gradType.type == GradientsUpdateType::AdaBound)
+    {
+        // extract AdaBound parameters from config, if they exist. Default to reasonable values.
+        m_adamInfo.beta1 = configSGD(L"adabound_beta1", 0.9);
+        m_adamInfo.beta2 = configSGD(L"adabound_beta2", 0.999);
+        m_adaBoundInfo.gamma = configSGD(L"adabound_gamma", 1 - m_adamInfo.beta2);
+        m_adaBoundInfo.final_lr = configSGD(L"adabound_final_lr", 0.1);
+        m_adaBoundInfo.amsBound = configSGD(L"adabound_using_amsbound", false);
+    }
 
     m_needAveMultiplier = configSGD(L"normWithAveMultiplier", true);
     m_L2RegWeight = configSGD(L"L2RegWeight", 0.0);
@@ -3797,6 +3886,6 @@ void SGDParams::InitializeAndCheckBlockMomentumSGDParameters()
 
 // register SGD<> with the ScriptableObject system
 ScriptableObjects::ConfigurableRuntimeTypeRegister::AddFloatDouble<SGD<float>, SGD<double>> registerSGDOptimizer(L"SGDOptimizer");
-}
-}
-}
+} // namespace CNTK
+} // namespace MSR
+} // namespace Microsoft
