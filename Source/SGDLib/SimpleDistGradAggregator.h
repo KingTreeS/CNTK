@@ -8,10 +8,6 @@
 
 #define __PROFILE__
 
-#ifdef __PROFILE__
-#include "LogPrintInfo.h"
-#endif
-
 #undef _SCL_SECURE_NO_WARNINGS
 #include "Constants.h"
 #include "CNTKLibrary.h"
@@ -38,6 +34,24 @@ static size_t profileCnt = 0;
 #ifdef __PROFILE__
 std::chrono::time_point<std::chrono::system_clock> sdStartTime;
 std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+
+double sdCudaMemcpyAndMPIAllGatherTime = 0.0;
+double sdMPIIallgatherTime = 0.0;
+double sdMPIAllGatherTime = 0.0;
+double sdNCCLAllGatherTime = 0.0;
+double sdNCCLSyncTime = 0.0;
+double sdMPIWaitTime = 0.0;
+
+double aggAsyncTime = 0.0;
+double aggSwapTime = 0.0;
+double aggCopyGradDataToBufferTime = 0.0;
+double aggInitRecvHeaderAndSendNodes = 0.0;
+double aggNCCLAllReduceTime = 0.0;
+double aggMainNodeWaitAndAggTime = 0.0;
+double aggMPIBcastTime = 0.0;
+double aggNCCLSyncTime = 0.0;
+double aggCopyDataBackToGradTime = 0.0;
+double aggMPIWaitTime = 0.0;
 #endif
 
 template <class ElemType>
@@ -104,11 +118,17 @@ public:
             }
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::aggAsyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            aggAsyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+			if (profileCnt % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: Async gradient aggregation wait time time = %.8gs\n", (int) profileCnt, aggAsyncTime);
+                aggAsyncTime = 0.0;
+            }
 #endif
 
 #ifdef __PROFILE__
-            sdStartTime = std::chrono::system_clock::now();
+                sdStartTime = std::chrono::system_clock::now();
 #endif
             std::vector<Matrix<ElemType>*> newGradients;
             size_t numGradMatrices = gradients.size();
@@ -133,7 +153,13 @@ public:
             swap(*headerCPU, *m_bufferedGradHeader);
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::aggSwapTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            aggSwapTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+			if (profileCnt % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: Swap the grad header contents with the buffered grad header time = %.8gs\n", (int) profileCnt, aggSwapTime);
+                aggSwapTime = 0.0;
+            }
 #endif
 
             // Initiate aggregation only if any samples were processed in previous iteration
@@ -330,8 +356,8 @@ private:
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-    // Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
+#endif  // __PROFILE__
+        // Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
         size_t offset = 0;
         for (size_t i : m_packedGradientsIndex)
         {
@@ -340,13 +366,20 @@ private:
         }
 #ifdef __PROFILE__
         sdEndTime = std::chrono::system_clock::now();
-        Chashu::aggCopyGradDataToBufferTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        aggCopyGradDataToBufferTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+		if (profileCnt % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: Copy all gradient data into a single contiguous buffer time = %.8gs\n", (int) profileCnt, aggCopyGradDataToBufferTime);
+            aggCopyGradDataToBufferTime = 0.0;
+        }
+
 #endif // __PROFILE__
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-// Initiate receive of the header on the main node
+#endif  // __PROFILE__
+        // Initiate receive of the header on the main node
         std::vector<MPI_Request> recvHeaderRequests(NumProc() - 1);
         if (m_mpi->IsMainNode())
         {
@@ -364,7 +397,13 @@ private:
             m_mpi->Isend(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank(), numGradMatrices, &sendHeaderRequest) || MpiFail("MPI_Isend");
 #ifdef __PROFILE__
         sdEndTime = std::chrono::system_clock::now();
-        Chashu::aggInitRecvHeaderAndSendNodes += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        aggInitRecvHeaderAndSendNodes += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+		if (profileCnt % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: Initiate receive of the header on the main node time = %.8gs\n", (int) profileCnt, aggInitRecvHeaderAndSendNodes);
+            aggInitRecvHeaderAndSendNodes = 0.0;
+        }
 #endif // __PROFILE__
 
         // New aggregation pipeline for non-GDR, perform sync allreduce on the gradient data
@@ -494,15 +533,21 @@ private:
                 m_nccl->AllReduce(ncclReduceGradients);
 #ifdef __PROFILE__
                 sdEndTime = std::chrono::system_clock::now();
-                Chashu::aggNCCLAllReduceTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+                aggNCCLAllReduceTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+				if ((profileCnt - 1) % 100 == 0)
+                {
+                    fprintf(stderr, "Iteration [%d]: aggregate nccl allreduce time = %.8gs\n", (int) profileCnt, aggNCCLAllReduceTime);
+                    aggNCCLAllReduceTime = 0.0;
+                }
 #endif
             }
         }
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-        // On the main node wait for the headers to arrive and aggregate
+#endif // __PROFILE__ \
+    // On the main node wait for the headers to arrive and aggregate
         if (m_mpi->IsMainNode())
         {
             size_t numNodesHeadersReceivedFrom = 0;
@@ -524,17 +569,29 @@ private:
         }
 #ifdef __PROFILE__
         sdEndTime = std::chrono::system_clock::now();
-        Chashu::aggMainNodeWaitAndAggTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        aggMainNodeWaitAndAggTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+		if ((profileCnt - 1) % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: On the main node wait for the headers to arrive and aggregate time = %.8gs\n", (int) profileCnt, aggMainNodeWaitAndAggTime);
+            aggMainNodeWaitAndAggTime = 0.0;
+        }
 #endif
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-        // Broadcast the aggregated header to all nodes
+#endif // __PROFILE__ \
+    // Broadcast the aggregated header to all nodes
         m_mpi->Bcast(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank());
 #ifdef __PROFILE__
         sdEndTime = std::chrono::system_clock::now();
-        Chashu::aggMPIBcastTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        aggMPIBcastTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+		if ((profileCnt - 1) % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: Broadcast the aggregated header to all nodes time = %.8gs\n", (int) profileCnt, aggMPIBcastTime);
+            aggMPIBcastTime = 0.0;
+        }
 #endif
 
 #ifdef __PROFILE__
@@ -545,7 +602,13 @@ private:
             m_nccl->Sync();
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::aggNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            aggNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+			if ((profileCnt - 1) % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: aggregate nccl sync time = %.8gs\n", (int) profileCnt, aggNCCLSyncTime);
+                aggNCCLSyncTime = 0.0;
+            }
 #endif
         }
         // Non-GDR && GPU
@@ -567,8 +630,8 @@ private:
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-        // Copy data back to the packed gradients from the continous buffer
+#endif // __PROFILE__ \
+    // Copy data back to the packed gradients from the continous buffer
         offset = 0;
         for (size_t i : m_packedGradientsIndex)
         {
@@ -577,18 +640,30 @@ private:
         }
 #ifdef __PROFILE__
         sdEndTime = std::chrono::system_clock::now();
-        Chashu::aggCopyDataBackToGradTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        aggCopyDataBackToGradTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+		if ((profileCnt - 1) % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: Copy data back to the packed gradients from the continous buffer time = %.8gs\n", (int) profileCnt, aggCopyDataBackToGradTime);
+            aggCopyDataBackToGradTime = 0.0;
+        }
 #endif
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-        // Wait for completion of the async send requests
+#endif // __PROFILE__ \
+    // Wait for completion of the async send requests
         if (!m_mpi->IsMainNode())
             m_mpi->Wait(&sendHeaderRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
 #ifdef __PROFILE__
         sdEndTime = std::chrono::system_clock::now();
-        Chashu::aggMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        aggMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+		if ((profileCnt - 1) % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: Wait for completion of the async send requests time = %.8gs\n", (int) profileCnt, aggMPIWaitTime);
+            aggMPIWaitTime = 0.0;
+        }
 #endif
 
         if (showSyncPerfStats)
@@ -656,7 +731,13 @@ private:
             cudaMemcpy(gatheredMatrixBuffer, m_intermediateDistributedCPUBuffer2.get(), gatheredMatrix.GetNumElements() * sizeof(ElemType), cudaMemcpyHostToDevice);
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::sdCudaMemcpyAndMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            sdCudaMemcpyAndMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+            if (profileCnt % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: cuda memcpy and mpi allgather time = %.8gs\n", (int) profileCnt, sdCudaMemcpyAndMPIAllGatherTime);
+                sdCudaMemcpyAndMPIAllGatherTime = 0.0;
+            }
 #endif
         }
         else if (!m_nccl->IsSupported()) // non-NCCL, using CPU, using GDR
@@ -677,7 +758,13 @@ private:
                     MpiFail("MPI_Iallgather");
 #ifdef __PROFILE__
                 sdEndTime = std::chrono::system_clock::now();
-                Chashu::sdMPIIallgatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+                sdMPIIallgatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+                if (profileCnt % 100 == 0)
+                {
+                    fprintf(stderr, "Iteration [%d]: mpi iallgather time = %.8gs\n", (int) profileCnt, sdMPIIallgatherTime);
+                    sdMPIIallgatherTime = 0.0;
+                }
 #endif
             }
             else if (deviceId != CPUDEVICE) // GDR && GPU
@@ -689,7 +776,13 @@ private:
                 m_mpi->AllGather(distributedMatrixBuffer, count, gatheredMatrixBuffer, count);
 #ifdef __PROFILE__
                 sdEndTime = std::chrono::system_clock::now();
-                Chashu::sdMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+                sdMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+                if (profileCnt % 100 == 0)
+                {
+                    fprintf(stderr, "Iteration [%d]: mpi allgather time = %.8gs\n", (int) profileCnt, sdMPIAllGatherTime);
+                    sdMPIAllGatherTime = 0.0;
+                }
 #endif
             }
             else
@@ -705,7 +798,13 @@ private:
             m_nccl->AllGather(distributedMatrixBuffer, gatheredMatrixBuffer, count);
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::sdNCCLAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            sdNCCLAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+            if (profileCnt % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: nccl allgather time = %.8gs\n", (int) profileCnt, sdNCCLAllGatherTime);
+                sdNCCLAllGatherTime = 0.0;
+            }
 #endif
         }
         else
@@ -719,7 +818,13 @@ private:
             m_nccl->Sync();
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::sdNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            sdNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+            if (profileCnt % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: nccl sync time = %.8gs\n", (int) profileCnt, sdNCCLSyncTime);
+                sdNCCLSyncTime = 0.0;
+            }
 #endif
         }
         else if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE))
@@ -730,7 +835,13 @@ private:
             m_mpi->Wait(&allGatherRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait"); // Wait for the Iallreduce operations to finish
 #ifdef __PROFILE__
             sdEndTime = std::chrono::system_clock::now();
-            Chashu::sdMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            sdMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+
+            if (profileCnt % 100 == 0)
+            {
+                fprintf(stderr, "Iteration [%d]: mpi wait time = %.8gs\n", (int) profileCnt, sdMPIWaitTime);
+                sdMPIWaitTime = 0.0;
+            }
 #endif
         }
         else

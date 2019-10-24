@@ -5,9 +5,6 @@
 #pragma once
 
 #define __PROFILE__
-#ifdef __PROFILE__
-#include "LogPrintInfo.h"
-#endif
 
 #include "Basics.h"
 #include "ComputationNode.h"
@@ -37,6 +34,12 @@ namespace CNTK
 #ifdef __PROFILE__
 std::chrono::time_point<std::chrono::system_clock> tnStartTime;
 std::chrono::time_point<std::chrono::system_clock> tnEndTime;
+
+static int tnIterCnt = 0;
+double tnGatherDistLabelTime = 0.0;
+double tnMatrixMultiplyTime = 0.0;
+double tnDistLabelAddTime = 0.0;
+double tnMatrixScaleTime = 0.0;
 #endif
 
 // Names of random variable types
@@ -645,7 +648,13 @@ public:
             DistributedGatheredLabels<ElemType>::gatherDistributedLabels(InputRef(0).Value());
 #ifdef __PROFILE__
         tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        tnGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+        if (tnIterCnt % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: gather dist label time = %.8gs\n", (int) tnIterCnt, tnGatherDistLabelTime);
+            tnGatherDistLabelTime = 0.0;
+        }
 #endif // __PROFILE__
 
         m_distGradAggPtr->DistributedAllGather(X, *m_temp1, m_inputDim * m_minibatchSize);
@@ -655,26 +664,44 @@ public:
         Matrix<ElemType>::Multiply(W, true, *m_temp1, false, Value());
 #ifdef __PROFILE__
         tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnMatrixMultiplyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        tnMatrixMultiplyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+		if (tnIterCnt % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: matrix multiply time = %.8gs\n", (int) tnIterCnt, tnMatrixMultiplyTime);
+            tnMatrixMultiplyTime = 0.0;
+        }
 #endif // __PROFILE__
 
         if (Environment().IsTraining())
 #ifdef __PROFILE__
             tnStartTime = std::chrono::system_clock::now();
 #endif // __PROFILE__
-            Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
+        Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
 #ifdef __PROFILE__
-			tnEndTime = std::chrono::system_clock::now();
-            Chashu::tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        tnEndTime = std::chrono::system_clock::now();
+        tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+		if (tnIterCnt % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: dist label add time = %.8gs\n", (int) tnIterCnt, tnDistLabelAddTime);
+            tnDistLabelAddTime = 0.0;
+        }
 #endif // __PROFILE__
 
 #ifdef __PROFILE__
-		tnStartTime = std::chrono::system_clock::now();
+        tnStartTime = std::chrono::system_clock::now();
 #endif // __PROFILE__
         Matrix<ElemType>::Scale((ElemType) m_scale, Value());
 #ifdef __PROFILE__
         tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnMatrixScaleTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        tnMatrixScaleTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+		if (tnIterCnt++ % 100 == 0)
+        {
+            fprintf(stderr, "Iteration [%d]: matrix scale time = %.8gs\n", (int) tnIterCnt, tnMatrixScaleTime);
+            tnMatrixScaleTime = 0.0;
+        }
 #endif // __PROFILE__
     }
 
