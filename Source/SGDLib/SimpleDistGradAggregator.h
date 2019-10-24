@@ -9,7 +9,7 @@
 #define __PROFILE__
 
 #ifdef __PROFILE__
-#include <Nodes/ComputationNode.h>
+#include "ComputationNode.h"
 #endif
 
 #undef _SCL_SECURE_NO_WARNINGS
