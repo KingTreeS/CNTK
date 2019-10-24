@@ -22,6 +22,38 @@
 #define let const auto
 #endif
 
+namespace Chashu
+{
+double convTime = 0.0;
+// fully connect
+double tnGatherDistLabelTime = 0.0;
+double tnMatrixMultiplyTime = 0.0;
+double tnDistLabelAddTime = 0.0;
+double tnMatrixScaleTime = 0.0;
+
+double sdCudaMemcpyAndMPIAllGatherTime = 0.0;
+double sdMPIIallgatherTime = 0.0;
+double sdMPIAllGatherTime = 0.0;
+double sdNCCLAllGatherTime = 0.0;
+double sdNCCLSyncTime = 0.0;
+double sdMPIWaitTime = 0.0;
+
+// Aggregation
+double aggFormListOfSmoothedGradTime = 0.0;
+double aggHoistCriterionToCPUAllreduceTime = 0.0;
+double aggCopyAllValToBeAggregatedToHeaderTime = 0.0;
+double aggAsyncTime = 0.0;
+double aggSwapTime = 0.0;
+double aggCopyGradDataToBufferTime = 0.0;
+double aggInitRecvHeaderAndSendNodes = 0.0;
+double aggNCCLAllReduceTime = 0.0;
+double aggMainNodeWaitAndAggTime = 0.0;
+double aggMPIBcastTime = 0.0;
+double aggNCCLSyncTime = 0.0;
+double aggCopyDataBackToGradTime = 0.0;
+double aggMPIWaitTime = 0.0;
+}
+
 namespace Microsoft { namespace MSR { namespace CNTK {
 
     using namespace std;

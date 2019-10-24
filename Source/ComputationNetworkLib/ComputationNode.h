@@ -64,6 +64,41 @@
 #define CNTK_MODEL_VERSION_30 30 // LatticeWithSequenceSoftmax node
 #define CURRENT_CNTK_MODEL_VERSION CNTK_MODEL_VERSION_30
 
+
+namespace Chashu
+{
+/// every 100 iters to print
+// convolution
+extern double convTime;
+// fully connect
+extern double tnGatherDistLabelTime;
+extern double tnMatrixMultiplyTime;
+extern double tnDistLabelAddTime;
+extern double tnMatrixScaleTime;
+
+extern double sdCudaMemcpyAndMPIAllGatherTime;
+extern double sdMPIIallgatherTime;
+extern double sdMPIAllGatherTime;
+extern double sdNCCLAllGatherTime;
+extern double sdNCCLSyncTime;
+extern double sdMPIWaitTime;
+
+// Aggregation
+extern double aggFormListOfSmoothedGradTime;
+extern double aggHoistCriterionToCPUAllreduceTime;
+extern double aggCopyAllValToBeAggregatedToHeaderTime;
+extern double aggAsyncTime;
+extern double aggSwapTime;
+extern double aggCopyGradDataToBufferTime;
+extern double aggInitRecvHeaderAndSendNodes;
+extern double aggNCCLAllReduceTime;
+extern double aggMainNodeWaitAndAggTime;
+extern double aggMPIBcastTime;
+extern double aggNCCLSyncTime;
+extern double aggCopyDataBackToGradTime;
+extern double aggMPIWaitTime;
+}
+
 // helper mode for debugging
 // If TRACK_GAP_NANS is defined then initialize layout gaps to NaN and do NaN checks. Also do detailed logging of node computations.
 // #define TRACK_GAP_NANS

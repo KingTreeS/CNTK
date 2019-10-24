@@ -5,9 +5,6 @@
 #pragma once
 
 #define __PROFILE__
-#ifdef __PROFILE__
-#include "LogPrintInfo.h"
-#endif
 
 #include "Basics.h"
 #include "ComputationNode.h"
