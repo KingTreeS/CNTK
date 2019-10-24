@@ -714,8 +714,8 @@ private:
 
 #ifdef __PROFILE__
         if (profileCnt % 100 == 0)
-            LOGPRINTF(stderr, "DistributedMatrixBuffer Shape: %d\n", distributedMatrix.BufferSize());
-        LOGPRINTF(stderr, "GatheredMatrixBuffer Shape: %d\n", gatheredMatrix.BufferSize());
+            LOGPRINTF(stderr, "DistributedMatrixBuffer Shape: rows: %zd; cols: %zd\n", distributedMatrix.GetNumRows(), distributedMatrix.GetNumCols());
+			LOGPRINTF(stderr, "GatheredMatrixBuffe Shape: rows: %zd; cols: %zd\n", gatheredMatrix.GetNumRows(), gatheredMatrix.GetNumCols());
 
 #endif // __PROFILE__
 

@@ -1537,7 +1537,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         {
 #ifdef __PROFILE__
             if (iterCnt++ % 100 == 0)
-                LOGPRINTF(stderr, "Aggregation: Not use gradient aggregation.")
+                LOGPRINTF(stderr, "Aggregation: Not use gradient aggregation.");
 #endif
             // accumulate criterion values (objective, eval)
             assert(wasDataRead || numSamplesWithLabelOfNetwork == 0);
@@ -1550,7 +1550,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         {
 #ifdef __PROFILE__
             if (iterCnt++ % 100 == 0)
-				LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.")
+                LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.");
 #endif
 
 #ifdef __PROFILE__
