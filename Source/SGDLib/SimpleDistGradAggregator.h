@@ -35,11 +35,6 @@ namespace CNTK
 static size_t profileCnt = 0;
 #endif
 
-#ifdef __PROFILE__
-std::chrono::time_point<std::chrono::system_clock> sdStartTime;
-std::chrono::time_point<std::chrono::system_clock> sdEndTime;
-#endif
-
 template <class ElemType>
 class SimpleDistGradAggregator : public IDistGradAggregator<ElemType>
 {
@@ -63,6 +58,11 @@ public:
     // Aggregate the gradient matrices across all nodes
     bool AggregateGradients(const std::vector<Matrix<ElemType>*>& gradients, DistGradHeader* headerCPU, bool resetState) override
     {
+#ifdef __PROFILE__
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+#endif
+
         if (m_mpi->NumNodesInUse() == 1) // No need to aggregate anything.
             return (headerCPU->numSamples != 0);
 
@@ -327,6 +327,11 @@ private:
                 mainStreamSyncEvent->SynchronizeDataTransferFetchStreamWithEvent<ElemType>();
             }
         }
+
+#ifdef __PROFILE__
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+#endif
 
 #ifdef __PROFILE__
         sdStartTime = std::chrono::system_clock::now();
@@ -632,6 +637,11 @@ private:
 
     void DistributedAllGather(const Matrix<ElemType>& distributedMatrix, Matrix<ElemType>& gatheredMatrix, size_t count)
     {
+#ifdef __PROFILE__
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+#endif
+
         int deviceId = distributedMatrix.GetDeviceId();
         MPI_Request allGatherRequest;
         ElemType* distributedMatrixBuffer = distributedMatrix.Data();

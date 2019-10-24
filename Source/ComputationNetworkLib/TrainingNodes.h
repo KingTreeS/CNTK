@@ -31,11 +31,6 @@ namespace MSR
 namespace CNTK
 {
 
-#ifdef __PROFILE__
-std::chrono::time_point<std::chrono::system_clock> tnStartTime;
-std::chrono::time_point<std::chrono::system_clock> tnEndTime;
-#endif
-
 // Names of random variable types
 static const wstring RandomDistributionTypeUniform = L"uniform";
 static const wstring RandomDistributionTypeNormal = L"normal";
@@ -626,6 +621,10 @@ public:
 
     virtual void /*ComputationNodeNonLooping::*/ ForwardPropNonLooping() override
     {
+#ifdef __PROFILE__
+        std::chrono::time_point<std::chrono::system_clock> tnStartTime;
+        std::chrono::time_point<std::chrono::system_clock> tnEndTime;
+#endif
         auto& W = InputRef(1).Value();
         auto& X = InputRef(2).Value();
         if (m_weightNormalize)

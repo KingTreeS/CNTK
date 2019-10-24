@@ -19,11 +19,6 @@ namespace MSR
 namespace CNTK
 {
 
-#ifdef __PROFILE__
-std::chrono::time_point<std::chrono::system_clock> convStartTime;
-std::chrono::time_point<std::chrono::system_clock> convEndTime;
-#endif
-
 // -----------------------------------------------------------------------
 // ConvolutionNodeBase
 // -----------------------------------------------------------------------
@@ -591,6 +586,11 @@ public:
 public:
     void ForwardProp(const FrameRange& fr) override
     {
+#ifdef __PROFILE__
+		std::chrono::time_point<std::chrono::system_clock> convStartTime;
+		std::chrono::time_point<std::chrono::system_clock> convEndTime;
+#endif
+
 #ifdef __PROFILE__
         convStartTime = std::chrono::system_clock::now();
 #endif
