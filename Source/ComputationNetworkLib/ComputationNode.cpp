@@ -38,7 +38,13 @@ double sdNCCLAllGatherTime = 0.0;
 double sdNCCLSyncTime = 0.0;
 double sdMPIWaitTime = 0.0;
 
-// Aggregation
+double tnSoftMaxGatherDistLabelTime = 0.0;
+double tnSoftMaxDistAllReduceOneTime = 0.0;
+double tnSoftMaxDistAllReduceTwoTime = 0.0;
+double tnSoftMaxDistSoftTime = 0.0;
+double tnSoftMaxDistCrossEntropyTime = 0.0;
+
+    // Aggregation
 double aggFormListOfSmoothedGradTime = 0.0;
 double aggHoistCriterionToCPUAllreduceTime = 0.0;
 double aggCopyAllValToBeAggregatedToHeaderTime = 0.0;

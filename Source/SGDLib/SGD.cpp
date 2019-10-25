@@ -1343,36 +1343,50 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 fprintf(stderr, "Iteration [%d-%d]: prepare time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, prepareTime);
 
                 fprintf(stderr, "Iteration [%d-%d]: forward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, forwardTime);
-                fprintf(stderr, "Iteration [%d-%d]: conv time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::convTime);
-                fprintf(stderr, "Iteration [%d-%d]: gather dist label time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnGatherDistLabelTime);
-                fprintf(stderr, "Iteration [%d-%d]: cuda memcpy and mpi allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdCudaMemcpyAndMPIAllGatherTime);
-                fprintf(stderr, "Iteration [%d-%d]: mpi iallgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIIallgatherTime);
-                fprintf(stderr, "Iteration [%d-%d]: mpi allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIAllGatherTime);
-                fprintf(stderr, "Iteration [%d-%d]: nccl allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdNCCLAllGatherTime);
-                fprintf(stderr, "Iteration [%d-%d]: nccl sync time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdNCCLSyncTime);
-                fprintf(stderr, "Iteration [%d-%d]: mpi wait time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIWaitTime);
-                fprintf(stderr, "Iteration [%d-%d]: matrix multiply time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnMatrixMultiplyTime);
-                fprintf(stderr, "Iteration [%d-%d]: dist label add time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnDistLabelAddTime);
-                fprintf(stderr, "Iteration [%d-%d]: matrix scale time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnMatrixScaleTime);
-                
-				fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
-                
-				fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
-                fprintf(stderr, "Iteration [%d-%d]: lazily form the list of smoothedGradients to exchange time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggFormListOfSmoothedGradTime);
-                fprintf(stderr, "Iteration [%d-%d]: hoist the criterion into CPU space for all-reduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggHoistCriterionToCPUAllreduceTime);
-                fprintf(stderr, "Iteration [%d-%d]: copy all values to be aggregated into the header time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyAllValToBeAggregatedToHeaderTime);
-                fprintf(stderr, "Iteration [%d-%d]: Async gradient aggregation wait time time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggAsyncTime);
-                fprintf(stderr, "Iteration [%d-%d]: Swap the grad header contents with the buffered grad header time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggSwapTime);
-                fprintf(stderr, "Iteration [%d-%d]: Copy all gradient data into a single contiguous buffer time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyGradDataToBufferTime);
-                fprintf(stderr, "Iteration [%d-%d]: Initiate receive of the header on the main node time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggInitRecvHeaderAndSendNodes);
-                fprintf(stderr, "Iteration [%d-%d]: aggregate nccl allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggNCCLAllReduceTime);
-                fprintf(stderr, "Iteration [%d-%d]: On the main node wait for the headers to arrive and aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMainNodeWaitAndAggTime);
-                fprintf(stderr, "Iteration [%d-%d]: Broadcast the aggregated header to all nodes time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIBcastTime);
-                fprintf(stderr, "Iteration [%d-%d]: aggregate nccl sync time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggNCCLSyncTime);
-                fprintf(stderr, "Iteration [%d-%d]: Copy data back to the packed gradients from the continous buffer time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyDataBackToGradTime);
-                fprintf(stderr, "Iteration [%d-%d]: Wait for completion of the async send requests time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIWaitTime);
 
+                fprintf(stderr, "ConvolutionalNodes.h | class ConvolutionNode | func ForwardProp:\n");
+                fprintf(stderr, "Iteration [%d-%d]: line 587: conv time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::convTime);
+                fprintf(stderr, "TrainingNodes.h | class DistributedAdditiveFullConnectionNode | func ForwardPropNonLooping:\n");
+                fprintf(stderr, "Iteration [%d-%d]: line 682: gather dist label time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnGatherDistLabelTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 692: matrix multiply time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnMatrixMultiplyTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 702: dist label add time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnDistLabelAddTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 711: matrix scale time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnMatrixScaleTime);
                 
+				fprintf(stderr, "SimpleDistGradAggregator.h | class SimpleDistGradAggregator | func DistributedAllGather:\n");
+                fprintf(stderr, "Iteration [%d-%d]: line 663: cuda memcpy and mpi allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdCudaMemcpyAndMPIAllGatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 684: mpi iallgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIIallgatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 698: mpi allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIAllGatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 714: nccl allgather time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdNCCLAllGatherTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 728: nccl sync time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdNCCLSyncTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 739: mpi wait time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::sdMPIWaitTime);
+               
+				fprintf(stderr, "TrainingNodes.h | class DistributedCrossEntropyWithSoftmaxNode | func ForwardPropNonLooping:\n");
+                fprintf(stderr, "Iteration [%d-%d]: line 463: softmax gather dist label time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxGatherDistLabelTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 472: softmax first dist allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistAllReduceOneTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 481: softmax second dist allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistAllReduceTwoTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 493: softmax dist softmax time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistSoftTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 502: softmax dist cross entropy time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistCrossEntropyTime);
+
+				fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
+  
+				fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
+                fprintf(stderr, "SGD.h | class SGD | func TrainOneEpoch:\n");
+                fprintf(stderr, "Iteration [%d-%d]: line 1555: lazily form the list of smoothedGradients to exchange time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggFormListOfSmoothedGradTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 1589: hoist the criterion into CPU space for all-reduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggHoistCriterionToCPUAllreduceTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 1599: copy all values to be aggregated into the header time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyAllValToBeAggregatedToHeaderTime);
+                fprintf(stderr, "SimpleDistGradAggregator.h | class SimpleDistGradAggregator | func AggregateGradients:\n");
+				fprintf(stderr, "Iteration [%d-%d]: line 90: Async gradient aggregation wait time time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggAsyncTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 113: Swap the grad header contents with the buffered grad header time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggSwapTime);
+                fprintf(stderr, "SimpleDistGradAggregator.h | class SimpleDistGradAggregator | func AggregateGradientsImpl:\n");
+				fprintf(stderr, "Iteration [%d-%d]: line 341: Copy all gradient data into a single contiguous buffer time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyGradDataToBufferTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 355: Initiate receive of the header on the main node time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggInitRecvHeaderAndSendNodes);
+                fprintf(stderr, "Iteration [%d-%d]: line 495: aggregate nccl allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggNCCLAllReduceTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 511: On the main node wait for the headers to arrive and aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMainNodeWaitAndAggTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 539: Broadcast the aggregated header to all nodes time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIBcastTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 550: aggregate nccl sync time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggNCCLSyncTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 578: Copy data back to the packed gradients from the continous buffer time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggCopyDataBackToGradTime);
+                fprintf(stderr, "Iteration [%d-%d]: line 592: Wait for completion of the async send requests time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIWaitTime);
+
 				fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, updateTime);
                 prepareTime = 0.0;
                 forwardTime = 0.0;
@@ -1394,6 +1408,12 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 Chashu::sdNCCLAllGatherTime = 0.0;
                 Chashu::sdNCCLSyncTime = 0.0;
                 Chashu::sdMPIWaitTime = 0.0;
+
+				Chashu::tnSoftMaxGatherDistLabelTime = 0.0;
+                Chashu::tnSoftMaxDistAllReduceOneTime = 0.0;
+                Chashu::tnSoftMaxDistAllReduceTwoTime = 0.0;
+                Chashu::tnSoftMaxDistSoftTime = 0.0;
+                Chashu::tnSoftMaxDistCrossEntropyTime = 0.0;
 
                 Chashu::aggFormListOfSmoothedGradTime = 0.0;
                 Chashu::aggHoistCriterionToCPUAllreduceTime = 0.0;
@@ -1532,7 +1552,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         {
 #ifdef __PROFILE__
             if (iterCnt++ % 100 == 0)
-                LOGPRINTF(stderr, "Aggregation: Not use gradient aggregation.");
+                LOGPRINTF(stderr, "Aggregation: Not use gradient aggregation.\n");
 #endif
             // accumulate criterion values (objective, eval)
             assert(wasDataRead || numSamplesWithLabelOfNetwork == 0);
@@ -1545,7 +1565,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         {
 #ifdef __PROFILE__
             if (iterCnt++ % 100 == 0)
-                LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.");
+                LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.\n");
 #endif
 
 #ifdef __PROFILE__

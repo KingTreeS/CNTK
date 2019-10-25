@@ -83,6 +83,12 @@ extern double sdNCCLAllGatherTime;
 extern double sdNCCLSyncTime;
 extern double sdMPIWaitTime;
 
+extern double tnSoftMaxGatherDistLabelTime;
+extern double tnSoftMaxDistAllReduceOneTime;
+extern double tnSoftMaxDistAllReduceTwoTime;
+extern double tnSoftMaxDistSoftTime;
+extern double tnSoftMaxDistCrossEntropyTime;
+
 // Aggregation
 extern double aggFormListOfSmoothedGradTime;
 extern double aggHoistCriterionToCPUAllreduceTime;

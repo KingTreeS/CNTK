@@ -78,7 +78,7 @@ public:
         {
 #ifdef __PROFILE__
             if (profileCnt % 100 == 0)
-                LOGPRINTF(stderr, "Use Async Aggregation\n");
+                LOGPRINTF(stderr, "Aggregation: Use Async Aggregation\n");
 #endif
 
 #ifdef __PROFILE__
@@ -384,9 +384,9 @@ private:
 #ifdef __PROFILE__
             if (profileCnt % 100 == 0)
             {
-                LOGPRINTF(stderr, "m_mpi->UseGpuGdr() = %d\n", m_mpi->UseGpuGdr());
-                LOGPRINTF(stderr, "deviceId = %d\n", deviceId);
-                LOGPRINTF(stderr, "m_nccl->IsSupported() = %d\n", m_nccl->IsSupported());
+                LOGPRINTF(stderr, "AggregateGradientsImpl: m_mpi->UseGpuGdr() = %d\n", m_mpi->UseGpuGdr());
+                LOGPRINTF(stderr, "AggregateGradientsImpl: deviceId = %d\n", deviceId);
+                LOGPRINTF(stderr, "AggregateGradientsImpl: m_nccl->IsSupported() = %d\n", m_nccl->IsSupported());
             }
 #endif
             // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
@@ -648,10 +648,9 @@ private:
         ElemType* gatheredMatrixBuffer = gatheredMatrix.Data();
 
 #ifdef __PROFILE__
-        if (profileCnt % 100 == 0)
-            LOGPRINTF(stderr, "DistributedMatrixBuffer Shape: rows: %zd; cols: %zd\n", distributedMatrix.GetNumRows(), distributedMatrix.GetNumCols());
-			LOGPRINTF(stderr, "GatheredMatrixBuffe Shape: rows: %zd; cols: %zd\n", gatheredMatrix.GetNumRows(), gatheredMatrix.GetNumCols());
-
+		// if (profileCnt % 100 == 0)
+        //  LOGPRINTF(stderr, "DistributedMatrixBuffer Shape: rows: %zd; cols: %zd\n", distributedMatrix.GetNumRows(), distributedMatrix.GetNumCols());
+		//	LOGPRINTF(stderr, "GatheredMatrixBuffe Shape: rows: %zd; cols: %zd\n", gatheredMatrix.GetNumRows(), gatheredMatrix.GetNumCols());
 #endif // __PROFILE__
 
         if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported()) // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU

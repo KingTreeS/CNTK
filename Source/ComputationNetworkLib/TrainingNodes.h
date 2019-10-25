@@ -451,18 +451,60 @@ public:
     {
         auto& Y = InputRef(1).Value();
         Y.VectorMax(*m_temp1, *m_temp2, true);
+#ifdef __PROFILE__
+        std::chrono::time_point<std::chrono::system_clock> tnStartTime;
+        std::chrono::time_point<std::chrono::system_clock> tnEndTime;
+#endif
+
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
         if (DistributedGatheredLabels<ElemType>::isInitializeNode(this))
             DistributedGatheredLabels<ElemType>::gatherDistributedLabels(InputRef(0).Value());
-        m_distGradAggPtr->DistributedAllReduce(*m_temp2, MPI_MAX);
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnSoftMaxGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
 
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
+        m_distGradAggPtr->DistributedAllReduce(*m_temp2, MPI_MAX);
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnSoftMaxDistAllReduceOneTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
+
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
         Matrix<ElemType>::MinusRowVector(Y, *m_temp2, Y);
         Matrix<ElemType>::AssignExpSum(Y, *m_temp1);
         m_distGradAggPtr->DistributedAllReduce(*m_temp1, MPI_SUM);
         m_temp1->InplaceLog();
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnSoftMaxDistAllReduceTwoTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
 
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
         Matrix<ElemType>::DistributedSoftmax(Y, *m_temp1, *m_softmaxOfRight, *m_logSoftmaxOfRight);
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnSoftMaxDistSoftTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
+
+#ifdef __PROFILE__
+        tnStartTime = std::chrono::system_clock::now();
+#endif // __PROFILE__
         Matrix<ElemType>::DistributedCrossEntropy(*m_logSoftmaxOfRight, *DistributedGatheredLabels<ElemType>::m_gatheredLabels, Value(), m_probDim * m_rank, m_probDim * (m_rank + 1) - 1);
-    }
+#ifdef __PROFILE__
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnSoftMaxDistCrossEntropyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+#endif // __PROFILE__
+	}
 
     virtual void /*ComputationNodeBase::*/ Validate(bool isFinalValidationPass) override
     {
@@ -636,7 +678,6 @@ public:
 #ifdef __PROFILE__
         tnStartTime = std::chrono::system_clock::now();
 #endif // __PROFILE__
-
         if (DistributedGatheredLabels<ElemType>::isInitializeNode(this))
             DistributedGatheredLabels<ElemType>::gatherDistributedLabels(InputRef(0).Value());
 #ifdef __PROFILE__
@@ -658,14 +699,14 @@ public:
 #ifdef __PROFILE__
             tnStartTime = std::chrono::system_clock::now();
 #endif // __PROFILE__
-            Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
+        Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
 #ifdef __PROFILE__
-			tnEndTime = std::chrono::system_clock::now();
-            Chashu::tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        tnEndTime = std::chrono::system_clock::now();
+        Chashu::tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
 #endif // __PROFILE__
 
 #ifdef __PROFILE__
-		tnStartTime = std::chrono::system_clock::now();
+        tnStartTime = std::chrono::system_clock::now();
 #endif // __PROFILE__
         Matrix<ElemType>::Scale((ElemType) m_scale, Value());
 #ifdef __PROFILE__
