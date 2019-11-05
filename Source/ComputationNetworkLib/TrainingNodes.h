@@ -4,8 +4,6 @@
 //
 #pragma once
 
-#define __PROFILE__
-
 #include "Basics.h"
 #include "ComputationNode.h"
 #include "BatchNormalizationEngine.h"
@@ -451,60 +449,66 @@ public:
     {
         auto& Y = InputRef(1).Value();
         Y.VectorMax(*m_temp1, *m_temp2, true);
-#ifdef __PROFILE__
-        std::chrono::time_point<std::chrono::system_clock> tnStartTime;
-        std::chrono::time_point<std::chrono::system_clock> tnEndTime;
-#endif
+        if (__DETAIL_PROFILE__)
+        {
+            std::chrono::time_point<std::chrono::system_clock> tnStartTime;
+            std::chrono::time_point<std::chrono::system_clock> tnEndTime;
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+			tnStartTime = std::chrono::system_clock::now();
+		}
+
         if (DistributedGatheredLabels<ElemType>::isInitializeNode(this))
             DistributedGatheredLabels<ElemType>::gatherDistributedLabels(InputRef(0).Value());
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnSoftMaxGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnSoftMaxGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+			tnStartTime = std::chrono::system_clock::now();
+		}
+
         m_distGradAggPtr->DistributedAllReduce(*m_temp2, MPI_MAX);
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnSoftMaxDistAllReduceOneTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnSoftMaxDistAllReduceOneTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+			tnStartTime = std::chrono::system_clock::now();
+        }
+
         Matrix<ElemType>::MinusRowVector(Y, *m_temp2, Y);
         Matrix<ElemType>::AssignExpSum(Y, *m_temp1);
         m_distGradAggPtr->DistributedAllReduce(*m_temp1, MPI_SUM);
         m_temp1->InplaceLog();
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnSoftMaxDistAllReduceTwoTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnSoftMaxDistAllReduceTwoTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+            tnStartTime = std::chrono::system_clock::now();
+        }
+
         Matrix<ElemType>::DistributedSoftmax(Y, *m_temp1, *m_softmaxOfRight, *m_logSoftmaxOfRight);
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnSoftMaxDistSoftTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnSoftMaxDistSoftTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+
+            tnStartTime = std::chrono::system_clock::now();
+        }
+
         Matrix<ElemType>::DistributedCrossEntropy(*m_logSoftmaxOfRight, *DistributedGatheredLabels<ElemType>::m_gatheredLabels, Value(), m_probDim * m_rank, m_probDim * (m_rank + 1) - 1);
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnSoftMaxDistCrossEntropyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
-	}
+
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnSoftMaxDistCrossEntropyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        }
+    }
 
     virtual void /*ComputationNodeBase::*/ Validate(bool isFinalValidationPass) override
     {
@@ -663,10 +667,12 @@ public:
 
     virtual void /*ComputationNodeNonLooping::*/ ForwardPropNonLooping() override
     {
-#ifdef __PROFILE__
-        std::chrono::time_point<std::chrono::system_clock> tnStartTime;
-        std::chrono::time_point<std::chrono::system_clock> tnEndTime;
-#endif
+		if (__DETAIL_PROFILE__)
+		{
+            std::chrono::time_point<std::chrono::system_clock> tnStartTime;
+            std::chrono::time_point<std::chrono::system_clock> tnEndTime;
+		}
+
         auto& W = InputRef(1).Value();
         auto& X = InputRef(2).Value();
         if (m_weightNormalize)
@@ -675,44 +681,60 @@ public:
             W.RowElementDivideBy(*m_WNorm);
         }
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+		if (__DETAIL_PROFILE__)
+        {
+            tnStartTime = std::chrono::system_clock::now();
+        }
+
         if (DistributedGatheredLabels<ElemType>::isInitializeNode(this))
             DistributedGatheredLabels<ElemType>::gatherDistributedLabels(InputRef(0).Value());
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
+
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnGatherDistLabelTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        }
 
         m_distGradAggPtr->DistributedAllGather(X, *m_temp1, m_inputDim * m_minibatchSize);
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+
+		if (__DETAIL_PROFILE__)
+        {
+            tnStartTime = std::chrono::system_clock::now();
+        }
+
         Matrix<ElemType>::Multiply(W, true, *m_temp1, false, Value());
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnMatrixMultiplyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
+
+		if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnMatrixMultiplyTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        }
 
         if (Environment().IsTraining())
-#ifdef __PROFILE__
-            tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
-        Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
+        {
+            if (__DETAIL_PROFILE__)
+            {
+               tnStartTime = std::chrono::system_clock::now();
+            }
+			Matrix<ElemType>::DistributedLabelAdd(*DistributedGatheredLabels<ElemType>::m_gatheredLabels, (ElemType) m_bias, Value(), m_outputDim * m_rank, m_outputDim * (m_rank + 1) - 1);
 
-#ifdef __PROFILE__
-        tnStartTime = std::chrono::system_clock::now();
-#endif // __PROFILE__
+			if (__DETAIL_PROFILE__)
+			{
+				tnEndTime = std::chrono::system_clock::now();
+				Chashu::tnDistLabelAddTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+			}
+		}
+
+		if (__DETAIL_PROFILE__)
+        {
+            tnStartTime = std::chrono::system_clock::now();
+        }
         Matrix<ElemType>::Scale((ElemType) m_scale, Value());
-#ifdef __PROFILE__
-        tnEndTime = std::chrono::system_clock::now();
-        Chashu::tnMatrixScaleTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
-#endif // __PROFILE__
+        if (__DETAIL_PROFILE__)
+        {
+            tnEndTime = std::chrono::system_clock::now();
+            Chashu::tnMatrixScaleTime += (std::chrono::duration<double>(tnEndTime - tnStartTime)).count();
+        }
     }
 
     virtual bool OutputUsedInComputingInputNodesGradients() const override

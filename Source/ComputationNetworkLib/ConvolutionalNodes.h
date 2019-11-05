@@ -4,8 +4,6 @@
 //
 #pragma once
 
-#define __PROFILE__
-
 #include "Basics.h"
 #include "Globals.h"
 #include "Matrix.h"
@@ -586,14 +584,13 @@ public:
 public:
     void ForwardProp(const FrameRange& fr) override
     {
-#ifdef __PROFILE__
-		std::chrono::time_point<std::chrono::system_clock> convStartTime;
-		std::chrono::time_point<std::chrono::system_clock> convEndTime;
-#endif
+        if (__DETAIL_PROFILE__)
+		{
+            std::chrono::time_point<std::chrono::system_clock> convStartTime;
+            std::chrono::time_point<std::chrono::system_clock> convEndTime;
 
-#ifdef __PROFILE__
-        convStartTime = std::chrono::system_clock::now();
-#endif
+			convStartTime = std::chrono::system_clock::now();
+		}
 
         Matrix<ElemType> sliceOutputValue = ValueFor(fr);
         const Matrix<ElemType>& input0 = InputRef(0).ValueAsMatrix();
@@ -608,10 +605,11 @@ public:
             m_convEng->BackwardData(sliceInput1Value, input0, sliceOutputValue, /*accumulateGradient =*/true, *m_tempMatrixForward);
         }
 
-#ifdef __PROFILE__
-        convEndTime = std::chrono::system_clock::now();
-        Chashu::convTime += (std::chrono::duration<double>(convEndTime - convStartTime)).count();
-#endif
+		if (__DETAIL_PROFILE__)
+		{
+            convEndTime = std::chrono::system_clock::now();
+            Chashu::convTime += (std::chrono::duration<double>(convEndTime - convStartTime)).count();
+		}
     }
 
     void BackpropTo(const size_t inputIndex, const FrameRange& fr) override
