@@ -24,6 +24,7 @@
 
 namespace Chashu
 {
+char* detailProfile = std::getenv("PROFILE_FLAG");
 double convTime = 0.0;
 // fully connect
 double tnGatherDistLabelTime = 0.0;

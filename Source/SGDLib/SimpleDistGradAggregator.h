@@ -51,11 +51,9 @@ public:
     // Aggregate the gradient matrices across all nodes
     bool AggregateGradients(const std::vector<Matrix<ElemType>*>& gradients, DistGradHeader* headerCPU, bool resetState) override
     {
-        if (__DETAIL_PROFILE__)
-		{
-            std::chrono::time_point<std::chrono::system_clock> sdStartTime;
-            std::chrono::time_point<std::chrono::system_clock> sdEndTime;
-		}
+        //detail profile
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
 
         if (m_mpi->NumNodesInUse() == 1) // No need to aggregate anything.
             return (headerCPU->numSamples != 0);
@@ -70,7 +68,7 @@ public:
 
         if (m_useAsyncAggregation)
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 if (profileCnt % 100 == 0)
                     LOGPRINTF(stderr, "Aggregation: Use Async Aggregation\n");
@@ -97,7 +95,7 @@ public:
                 }
             }
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::aggAsyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -127,7 +125,7 @@ public:
             // Swap the grad header contents with the buffered grad header
             swap(*headerCPU, *m_bufferedGradHeader);
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::aggSwapTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -325,13 +323,11 @@ private:
             }
         }
 
-		if (__DETAIL_PROFILE__)
-		{
-            std::chrono::time_point<std::chrono::system_clock> sdStartTime;
-            std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+		// detail profile
+		std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
 
-			sdStartTime = std::chrono::system_clock::now();
-		}
+        sdStartTime = std::chrono::system_clock::now();
 
     // Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
         size_t offset = 0;
@@ -341,7 +337,7 @@ private:
             offset += gradients[i]->GetNumElements();
         }
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggCopyGradDataToBufferTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -366,7 +362,7 @@ private:
         if (!m_mpi->IsMainNode())
             m_mpi->Isend(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank(), numGradMatrices, &sendHeaderRequest) || MpiFail("MPI_Isend");
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggInitRecvHeaderAndSendNodes += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -381,7 +377,7 @@ private:
         size_t numGradientIndex = m_gradientIndexToAggregate.size();
         if (numGradientIndex > 0)
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
 			{
                 if (profileCnt % 100 == 0)
                 {
@@ -394,7 +390,7 @@ private:
             // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
             if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported())
             {
-                if (__DETAIL_PROFILE__)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     if (profileCnt++ % 100 == 0)
                         LOGPRINTF(stderr, "AggregateGradientsImpl Branch1[non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU] : m_mpi->UseGpuGdr() == false && deviceId != CPUDEVICE && m_nccl->IsSupported() == false \n");
@@ -461,7 +457,7 @@ private:
             // non-NCCL, using CPU, using GDR
             else if (!m_nccl->IsSupported())
             {
-                if (__DETAIL_PROFILE__)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
 				{
                     if (profileCnt++ % 100 == 0)
                         LOGPRINTF(stderr, "AggregateGradientsImpl Branch2[non-NCCL, using CPU, using GDR] : m_nccl->IsSupported() == false \n");
@@ -489,7 +485,7 @@ private:
             }
             else if (m_nccl->IsSupported())
             {
-                if (__DETAIL_PROFILE__)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     if (profileCnt++ % 100 == 0)
                         LOGPRINTF(stderr, "AggregateGradientsImpl Branch3 : m_nccl->IsSupported() == true \n");
@@ -504,7 +500,7 @@ private:
                 }
                 m_nccl->AllReduce(ncclReduceGradients);
 
-				if (__DETAIL_PROFILE__)
+				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     sdEndTime = std::chrono::system_clock::now();
                     Chashu::aggNCCLAllReduceTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -512,7 +508,7 @@ private:
             }
         }
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdStartTime = std::chrono::system_clock::now();
         }
@@ -538,7 +534,7 @@ private:
             assert(numNodesHeadersReceivedFrom == (NumProc() - 1));
         }
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggMainNodeWaitAndAggTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -549,7 +545,7 @@ private:
     // Broadcast the aggregated header to all nodes
         m_mpi->Bcast(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank());
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggMPIBcastTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -561,7 +557,7 @@ private:
         {
             m_nccl->Sync();
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::aggNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -584,7 +580,7 @@ private:
             }
         }
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdStartTime = std::chrono::system_clock::now();
         }
@@ -597,7 +593,7 @@ private:
             offset += gradients[i]->GetNumElements();
         }
 
-        if (__DETAIL_PROFILE__)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggCopyDataBackToGradTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -609,7 +605,7 @@ private:
         if (!m_mpi->IsMainNode())
             m_mpi->Wait(&sendHeaderRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -656,11 +652,9 @@ private:
 
     void DistributedAllGather(const Matrix<ElemType>& distributedMatrix, Matrix<ElemType>& gatheredMatrix, size_t count)
     {
-        if (__DETAIL_PROFILE__)
-		{
-            std::chrono::time_point<std::chrono::system_clock> sdStartTime;
-            std::chrono::time_point<std::chrono::system_clock> sdEndTime;
-		}
+		// detail profile
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
 
         int deviceId = distributedMatrix.GetDeviceId();
         MPI_Request allGatherRequest;
@@ -669,7 +663,7 @@ private:
 
         if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported()) // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 if (profileCnt % 100 == 0)
                     LOGPRINTF(stderr, "DistributedAllGather Branch1[non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU] : m_mpi->UseGpuGdr() == false && deviceId != CPUDEVICE && m_nccl->IsSupported() == false \n");
@@ -680,7 +674,7 @@ private:
             m_mpi->AllGather(m_intermediateDistributedCPUBuffer1.get(), count, m_intermediateDistributedCPUBuffer2.get(), count);
             cudaMemcpy(gatheredMatrixBuffer, m_intermediateDistributedCPUBuffer2.get(), gatheredMatrix.GetNumElements() * sizeof(ElemType), cudaMemcpyHostToDevice);
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdCudaMemcpyAndMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -688,7 +682,7 @@ private:
         }
         else if (!m_nccl->IsSupported()) // non-NCCL, using CPU, using GDR
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 if (profileCnt % 100 == 0)
                     LOGPRINTF(stderr, "DistributedAllGather Branch2[non-NCCL, using CPU, using GDR] : m_nccl->IsSupported() == false \n");
@@ -696,7 +690,7 @@ private:
             }
             if (m_mpi->UseGpuGdr() == 0) // CPU
             {
-                if (__DETAIL_PROFILE__)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     if (profileCnt % 100 == 0)
                         LOGPRINTF(stderr, "DistributedAllGather Branch2.1[non-NCCL, using CPU]\n");
@@ -706,7 +700,7 @@ private:
                                   MPIWrapper::GetDataType(distributedMatrixBuffer), &allGatherRequest) ||
                     MpiFail("MPI_Iallgather");
 
-				if (__DETAIL_PROFILE__)
+				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     sdEndTime = std::chrono::system_clock::now();
                     Chashu::sdMPIIallgatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -714,7 +708,7 @@ private:
             }
             else if (deviceId != CPUDEVICE) // GDR && GPU
             {
-                if (__DETAIL_PROFILE__)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     if (profileCnt % 100 == 0)
                         LOGPRINTF(stderr, "DistributedAllGather Branch2.2[non-NCCL, using GPU&GDR]\n");
@@ -722,7 +716,7 @@ private:
 
                 m_mpi->AllGather(distributedMatrixBuffer, count, gatheredMatrixBuffer, count);
 
-				if (__DETAIL_PROFILE__)
+				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     sdEndTime = std::chrono::system_clock::now();
                     Chashu::sdMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -733,7 +727,7 @@ private:
         }
         else if (m_nccl->IsSupported()) // NCCL
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 if (profileCnt % 100 == 0)
                     LOGPRINTF(stderr, "DistributedAllGather Branch3 : m_nccl->IsSupported() == true \n");
@@ -742,7 +736,7 @@ private:
 
             m_nccl->AllGather(distributedMatrixBuffer, gatheredMatrixBuffer, count);
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdNCCLAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -751,7 +745,7 @@ private:
         else
             LogicError("LogicError in SimpleDistGradAggregator::DistributedAllGather");
 
-		if (__DETAIL_PROFILE__)
+		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdStartTime = std::chrono::system_clock::now();
         }
@@ -760,7 +754,7 @@ private:
         {
             m_nccl->Sync();
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -773,7 +767,7 @@ private:
         {
             m_mpi->Wait(&allGatherRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait"); // Wait for the Iallreduce operations to finish
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();

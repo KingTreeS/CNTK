@@ -1344,7 +1344,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
                 fprintf(stderr, "Iteration [%d-%d]: forward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, forwardTime);
 
-				if (__DETAIL_PROFILE__)
+				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
 				{
                     fprintf(stderr, "ConvolutionalNodes.h | class ConvolutionNode | func ForwardProp:\n");
                     fprintf(stderr, "Iteration [%d-%d]: line 587: conv time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::convTime);
@@ -1373,7 +1373,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 				fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
 				fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
 
-				if (__DETAIL_PROFILE__)
+				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     fprintf(stderr, "SGD.h | class SGD | func TrainOneEpoch:\n");
                     fprintf(stderr, "Iteration [%d-%d]: line 1555: lazily form the list of smoothedGradients to exchange time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggFormListOfSmoothedGradTime);
@@ -1401,7 +1401,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 updateTime = 0.0;
 
                 // Detail Info
-                if (__DETAIL_PROFILE__)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     Chashu::convTime = 0.0;
 
@@ -1557,7 +1557,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
         if (!useGradientAggregation)
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 if (iterCnt++ % 100 == 0)
                     LOGPRINTF(stderr, "Aggregation: Not use gradient aggregation.\n");
@@ -1572,7 +1572,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
         }
         else
         {
-            if (__DETAIL_PROFILE__)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 if (iterCnt++ % 100 == 0)
                     LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.\n");
@@ -1605,7 +1605,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 }
             }
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggFormListOfSmoothedGradTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1618,7 +1618,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 localEpochEvalErrors.Assign(i, numSamplesWithLabelOfNetwork);
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggHoistCriterionToCPUAllreduceTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1634,7 +1634,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 m_gradHeader->evalErrors[i] = localEpochEvalErrors.GetCriterion(i);
 
-			if (__DETAIL_PROFILE__)
+			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggCopyAllValToBeAggregatedToHeaderTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();

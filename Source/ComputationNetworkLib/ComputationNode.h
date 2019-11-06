@@ -4,7 +4,8 @@
 //
 #pragma once
 
-#define __DETAIL_PROFILE__ std::getenv("PROFILE_FLAG")
+//#define strcmp(Chashu::detailProfile, "TRUE") == 0 std::getenv("PROFILE_FLAG")
+//#define strcmp(Chashu::detailProfile, "TRUE") == 0 TRUE
 
 #include "Basics.h"
 #include "Matrix.h"
@@ -68,6 +69,7 @@
 
 namespace Chashu
 {
+extern char* detailProfile;
 /// every 100 iters to print
 // convolution
 extern double convTime;
