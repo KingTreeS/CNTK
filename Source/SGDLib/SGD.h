@@ -376,6 +376,7 @@ protected:
 
     bool m_needAveMultiplier;
     double m_L2RegWeight;
+    bool m_disableL2perSampleIssue;
     double m_L1RegWeight;
 
     // Parallel training related with ASGD 
@@ -630,7 +631,8 @@ public:
                        const double L2RegWeight, const double L1RegWeight,
                        const bool needAveMultiplier,
                        const bool useNesterovMomentum,
-                       const bool disableMomentumUnitGain) const;
+                       const bool disableMomentumUnitGain,
+                       const bool disableL2perSampleIssue) const;
     // return -1 if nothing exists
     int DetermineStartEpoch(const bool makeMode);
 

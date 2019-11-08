@@ -1712,7 +1712,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                                   nodeDependentLearningRatePerSample, momentumPerSample,
                                   numSamplesInMinibatch,
                                   m_L2RegWeight * nodeDependentRegMultiplier, m_L1RegWeight * nodeDependentRegMultiplier,
-                                  m_needAveMultiplier, m_useNesterovMomentum, m_disableMomentumUnitGain);
+                                  m_needAveMultiplier, m_useNesterovMomentum, m_disableMomentumUnitGain, m_disableL2perSampleIssue);
                     node->BumpEvalTimeStamp();
 #ifdef _DEBUG
                     if (dynamic_pointer_cast<ComputationNode<ElemType>>(node)->Value().HasNan("TrainOneEpoch/UpdateWeights(): "))
@@ -2681,7 +2681,8 @@ void SGD<ElemType>::UpdateWeights(Matrix<ElemType>& functionValues, Matrix<ElemT
                                   const double L2RegWeight, const double L1RegWeight,
                                   const bool needAveMultiplier,
                                   const bool useNesterovMomentum,
-                                  const bool disableMomentumUnitGain) const
+                                  const bool disableMomentumUnitGain,
+                                  const bool disableL2perSampleIssue) const
 {
     // we use simple linear (instead of log linear) exponentiation here
     const double momentum = MomentumPerMB(momentumPerSample, actualMBSize);
@@ -2716,7 +2717,7 @@ void SGD<ElemType>::UpdateWeights(Matrix<ElemType>& functionValues, Matrix<ElemT
     if (L2RegWeight > 0)
     {
         // multiply by actualMBSize so that it's invariant to minibatch size since learning rate is per sample
-        Matrix<ElemType>::ScaleAndAdd((ElemType)(L2RegWeight * actualMBSize), functionValues, gradientValues);
+        Matrix<ElemType>::ScaleAndAdd((ElemType)(disableL2perSampleIssue ? L2RegWeight : L2RegWeight * actualMBSize), functionValues, gradientValues);
     }
 
     if (adpType == GradientsUpdateType::None)
@@ -3597,6 +3598,7 @@ SGDParams::SGDParams(const ConfigRecordType& configSGD, size_t sizeofElemType)
 
     m_needAveMultiplier = configSGD(L"normWithAveMultiplier", true);
     m_L2RegWeight = configSGD(L"L2RegWeight", 0.0);
+    m_disableL2perSampleIssue = configSGD(L"disableL2perSampleIssue", false);
     m_L1RegWeight = configSGD(L"L1RegWeight", 0.0);
 
     // for backward support. future setups should use gradUpdateType='AdaGrad', instead of useAdagrad=true
