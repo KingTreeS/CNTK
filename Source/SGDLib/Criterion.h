@@ -82,7 +82,7 @@ struct CriterionAccumulator
     //  accumulatorCriterionNodesNodes  - list of criterion nodes that already accumulate results
     CriterionAccumulator(const std::vector<ComputationNodeBasePtr>& criterionNodes, DEVICEID_TYPE deviceId,
                          const std::vector<ComputationNodeBasePtr>& accumulatorCriterionNodesNodes = {})
-        : m_aggregateCriterionValues(make_shared<Matrix<ElemType>>(1, criterionNodes.size(), deviceId)),
+        : m_aggregateCriterionValues(make_shared<Matrix<ElemType>>(1, criterionNodes.size(), -1)),
           m_criterionNodes(criterionNodes),
           m_accumulatorCriterionNodes(accumulatorCriterionNodesNodes)
     {
