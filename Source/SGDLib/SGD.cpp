@@ -1344,8 +1344,8 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
                 fprintf(stderr, "Iteration [%d-%d]: forward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, forwardTime);
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
-				{
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                {
                     fprintf(stderr, "ConvolutionalNodes.h | class ConvolutionNode | func ForwardProp:\n");
                     fprintf(stderr, "Iteration [%d-%d]: line 587: conv time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::convTime);
                     fprintf(stderr, "TrainingNodes.h | class DistributedAdditiveFullConnectionNode | func ForwardPropNonLooping:\n");
@@ -1368,12 +1368,12 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     fprintf(stderr, "Iteration [%d-%d]: line 481: softmax second dist allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistAllReduceTwoTime);
                     fprintf(stderr, "Iteration [%d-%d]: line 493: softmax dist softmax time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistSoftTime);
                     fprintf(stderr, "Iteration [%d-%d]: line 502: softmax dist cross entropy time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistCrossEntropyTime);
-				}
+                }
 
-				fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
-				fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
+                fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
+                fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     fprintf(stderr, "SGD.h | class SGD | func TrainOneEpoch:\n");
                     fprintf(stderr, "Iteration [%d-%d]: line 1555: lazily form the list of smoothedGradients to exchange time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggFormListOfSmoothedGradTime);
@@ -1393,7 +1393,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     fprintf(stderr, "Iteration [%d-%d]: line 592: Wait for completion of the async send requests time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIWaitTime);
                 }
 
-				fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, updateTime);
+                fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, updateTime);
                 prepareTime = 0.0;
                 forwardTime = 0.0;
                 backwardTime = 0.0;
@@ -1514,7 +1514,10 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 startTime = std::chrono::system_clock::now();
 #endif
                 if (learnRatePerSample > 0.01 * m_minLearnRate) // only compute gradient when learning rate is large enough
+                {
                     net->Backprop(criterionNodes[0]);
+                    fprintf(stderr, "Backprop\n");
+                }
 #ifdef __PROFILE__
                 endTime = std::chrono::system_clock::now();
                 backwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
@@ -1577,7 +1580,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 if (iterCnt++ % 100 == 0)
                     LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.\n");
 
-				aggStartTime = std::chrono::system_clock::now();
+                aggStartTime = std::chrono::system_clock::now();
             }
 
             // distributed gradient aggregation
@@ -1605,7 +1608,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 }
             }
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggFormListOfSmoothedGradTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1618,7 +1621,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 localEpochEvalErrors.Assign(i, numSamplesWithLabelOfNetwork);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggHoistCriterionToCPUAllreduceTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1634,7 +1637,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 m_gradHeader->evalErrors[i] = localEpochEvalErrors.GetCriterion(i);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggCopyAllValToBeAggregatedToHeaderTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();

@@ -294,17 +294,27 @@ private:
 
     void AggregateGradientsImpl(const std::vector<Matrix<ElemType>*>& gradients, DistGradHeader* headerCPU, bool showSyncPerfStats)
     {
+        // detail profile
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+
         Timer aggregationTimer;
         int deviceId = gradients[0]->GetDeviceId();
+
+		sdStartTime = std::chrono::system_clock::now();
         if (showSyncPerfStats)
         {
             std::unique_ptr<MatrixComputeStreamEvent> mainStreamSyncEvent(MatrixComputeStreamEvent::Create(deviceId));
             mainStreamSyncEvent->SynchronizeEvent();
             aggregationTimer.Start();
         }
+        sdEndTime = std::chrono::system_clock::now();
+        double chashu_agg_step1 = (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        fprintf(stderr, "AggregateGradientsImpl 313: %.8gs\n", chashu_agg_step1);
 
+
+		sdStartTime = std::chrono::system_clock::now();
         size_t numGradMatrices = gradients.size();
-
         if (headerCPU->numSamples == 0)
         {
             assert(headerCPU->criterion == 0.0);
@@ -322,14 +332,15 @@ private:
                 mainStreamSyncEvent->SynchronizeDataTransferFetchStreamWithEvent<ElemType>();
             }
         }
+        sdEndTime = std::chrono::system_clock::now();
+        double chashu_agg_step2 = (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+        fprintf(stderr, "AggregateGradientsImpl 337: %.8gs\n", chashu_agg_step2);
 
-		// detail profile
-		std::chrono::time_point<std::chrono::system_clock> sdStartTime;
-        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+		
 
-        sdStartTime = std::chrono::system_clock::now();
-
-    // Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
+        
+		sdStartTime = std::chrono::system_clock::now();
+		// Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
         size_t offset = 0;
         for (size_t i : m_packedGradientsIndex)
         {
@@ -345,7 +356,7 @@ private:
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Initiate receive of the header on the main node
+		// Initiate receive of the header on the main node
         std::vector<MPI_Request> recvHeaderRequests(NumProc() - 1);
         if (m_mpi->IsMainNode())
         {
@@ -390,6 +401,7 @@ private:
             // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
             if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported())
             {
+                sdStartTime = std::chrono::system_clock::now();
                 if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     if (profileCnt++ % 100 == 0)
@@ -453,6 +465,10 @@ private:
                     gpuToCpuIndex++;
                     currentGradientIndex = nextGradientIndex;
                 }
+
+				sdEndTime = std::chrono::system_clock::now();
+                double chashu_agg_step3 = (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+                fprintf(stderr, "AggregateGradientsImpl 471: %.8gs\n", chashu_agg_step3);
             }
             // non-NCCL, using CPU, using GDR
             else if (!m_nccl->IsSupported())
@@ -542,7 +558,7 @@ private:
 			sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Broadcast the aggregated header to all nodes
+	 // Broadcast the aggregated header to all nodes
         m_mpi->Bcast(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank());
 
 		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
@@ -569,6 +585,10 @@ private:
             // Wait for async CPU-to-GPU copy (non-GDR)
             for (size_t i = 0; i < allReduceIndex; i++)
                 m_gpuDataTransferers[i]->WaitForCopyCPUToGPUAsync();
+
+			sdEndTime = std::chrono::system_clock::now();
+            double chashu_agg_step4 = (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            fprintf(stderr, "AggregateGradientsImpl 591: %.8gs\n", chashu_agg_step4);
         }
         // CPU
         else if (m_mpi->UseGpuGdr() == 0)
@@ -578,6 +598,9 @@ private:
             {
                 m_mpi->Wait(&allReduceRequests[i], MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
             }
+            sdEndTime = std::chrono::system_clock::now();
+            double chashu_agg_step4 = (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
+            fprintf(stderr, "AggregateGradientsImpl 603: %.8gs\n", chashu_agg_step4);
         }
 
 		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
@@ -585,7 +608,7 @@ private:
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Copy data back to the packed gradients from the continous buffer
+		// Copy data back to the packed gradients from the continous buffer
         offset = 0;
         for (size_t i : m_packedGradientsIndex)
         {
@@ -601,7 +624,7 @@ private:
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Wait for completion of the async send requests
+		// Wait for completion of the async send requests
         if (!m_mpi->IsMainNode())
             m_mpi->Wait(&sendHeaderRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
 
