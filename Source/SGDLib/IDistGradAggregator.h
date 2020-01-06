@@ -3,7 +3,12 @@
 #include "DistGradHeader.h"
 #include "MPIWrapper.h"
 
-namespace Microsoft { namespace MSR { namespace CNTK {
+namespace Microsoft
+{
+namespace MSR
+{
+namespace CNTK
+{
 
 template <class ElemType>
 class IDistGradAggregator
@@ -11,10 +16,12 @@ class IDistGradAggregator
 public:
     IDistGradAggregator(const MPIWrapperPtr& mpi)
         : m_mpi(mpi)
-    {}
+    {
+    }
 
     virtual ~IDistGradAggregator()
-    {}
+    {
+    }
 
     // Returns a boolean indicating if any samples were processed
     virtual bool AggregateGradients(const std::vector<Matrix<ElemType>*>& gradients, DistGradHeader* headerCPU, bool resetState) = 0;
@@ -42,14 +49,25 @@ public:
         m_mpi->WaitAll();
     }
 
+public:
+    virtual void AsyncAggreagateGradients(const std::vector<Matrix<ElemType>*>& gradients)
+    {
+        if (gradients.empty())
+            return;
+    };
+
+    virtual bool AsyncAggregateGradHeader(DistGradHeader* headerCPU){return headerCPU == nullptr;}
+
 protected:
     MPIWrapperPtr m_mpi;
 };
 
 #define UsingIDistGradAggregatorMembers           \
-    \
+                                                  \
 protected:                                        \
     using IDistGradAggregator<ElemType>::m_mpi;   \
     using IDistGradAggregator<ElemType>::NumProc; \
     using IDistGradAggregator<ElemType>::MyRank
-} } }
+} // namespace CNTK
+} // namespace MSR
+} // namespace Microsoft

@@ -26,6 +26,57 @@ namespace MSR
 {
 namespace CNTK
 {
+#ifdef USE_NCCL
+namespace ASYNCNCCL
+{
+void SyncEvent(cudaEvent_t ev)
+{
+    auto rc = cudaEventQuery(ev);
+    if (rc != cudaErrorNotReady)
+    {
+        // if Event is ready then no need to wait
+        rc || "cudaEventQuery failed";
+        return;
+    }
+    // we must wait
+    cudaEventSynchronize(ev) || "cudaEventSynchronize failed";
+}
+
+template <typename ElemType>
+static void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
+{
+    if (!node->NeedsGradient())
+        return;
+
+    shared_ptr<ComputationNode<ElemType>> gradNode = dynamic_pointer_cast<ComputationNode<ElemType>>(*node);
+    if (gradNode->IsParameterUpdateRequired() && !gradNode->m_distribute)
+    {
+        Matrix<ElemType>* currParamsGradient = &(gradNode->Gradient()); // TODO: we can use shared_ptrs now
+
+        // Sometimes, in parallel training, the current node may not get any samples to process
+        // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
+        if (currParamsGradient->GetNumCols() == 0)
+        {
+            Matrix<ElemType>* currParamsValues = &(gradNode->Value());
+            currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
+        }
+
+        // sync stream
+        cudaEventCreate(&m_asyncEvent);
+        cudaEventRecord(m_asyncEvent);
+        SyncEvent(m_asyncEvent);
+
+        if (m_asyncNccl != nullptr)
+            m_asyncNccl->AllReduce(currParamsGradient);
+    }
+}
+
+// init in SGD
+static std::unique_ptr<NcclComm> m_asyncNccl = nullptr;
+static cudaEvent_t m_asyncEvent;
+} // namespace ASYNCNCCL
+#endif
+
 static size_t profileCnt = 0;
 
 template <class ElemType>
@@ -73,7 +124,7 @@ public:
                 if (profileCnt % 100 == 0)
                     LOGPRINTF(stderr, "Aggregation: Use Async Aggregation\n");
 
-				sdStartTime = std::chrono::system_clock::now();
+                sdStartTime = std::chrono::system_clock::now();
             }
 
             // If we are performing async gradient aggregation, let's wait for the pending gradient aggregation to finish
@@ -95,12 +146,12 @@ public:
                 }
             }
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::aggAsyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
 
-				sdStartTime = std::chrono::system_clock::now();
+                sdStartTime = std::chrono::system_clock::now();
             }
 
             std::vector<Matrix<ElemType>*> newGradients;
@@ -125,7 +176,7 @@ public:
             // Swap the grad header contents with the buffered grad header
             swap(*headerCPU, *m_bufferedGradHeader);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::aggSwapTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -169,6 +220,39 @@ public:
         }
     }
 
+    void AsyncAggreagateGradients(const std::vector<Matrix<ElemType>*>& gradients) override
+    {
+        if (m_mpi->NumNodesInUse() == 1) // No need to aggregate anything.
+            return;
+
+        // Initialize NCCL
+        if (m_nccl == nullptr)
+            m_nccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi));
+
+        // Copy gpu data to cpu if need
+        AsyncResetData(gradients);
+        AsyncAggreagateGradientsImpl(gradients);
+    }
+
+    bool AsyncAggregateGradHeader(DistGradHeader* headerCPU) override
+    {
+        if (m_mpi->NumNodesInUse() == 1) // No need to aggregate anything.
+            return (headerCPU->numSamples != 0);
+
+        // Initialize NCCL
+        if (m_nccl == nullptr)
+            m_nccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi));
+
+        if (m_mpi->IsMainNode())
+        {
+            for (size_t i = 0; i < NumProc() - 1; ++i)
+                m_recvHeaders.push_back(DistGradHeader::Create(headerCPU->numEvalNode));
+        }
+
+        AsyncAggregateGradHeaderImpl(headerCPU);
+        return (headerCPU->numSamples != 0);
+    }
+
 private:
     std::shared_ptr<ElemType> AllocateIntermediateBuffer(int deviceID, size_t numElements)
     {
@@ -178,6 +262,17 @@ private:
         size_t totalSize = sizeof(ElemType) * numElements;
         return std::shared_ptr<ElemType>((ElemType*) m_allocator->Malloc(totalSize), [this, deviceID](ElemType* p) {
             m_allocator->Free(p);
+        });
+    }
+
+    std::shared_ptr<ElemType> SyncAllocateIntermediateBuffer(int deviceID, size_t numElements)
+    {
+        assert(deviceID >= 0);
+
+        // Use pinned memory for GPU devices for better copy performance
+        size_t totalSize = sizeof(ElemType) * numElements;
+        return std::shared_ptr<ElemType>((ElemType*) m_asyncAllocator->Malloc(totalSize), [this, deviceID](ElemType* p) {
+            m_asyncAllocator->Free(p);
         });
     }
 
@@ -292,6 +387,30 @@ private:
         }
     }
 
+    void AsyncResetData(const std::vector<Matrix<ElemType>*>& gradients)
+    {
+        int deviceId = gradients[0]->GetDeviceId();
+        if (!ShouldCopyDataToCPU(deviceId))
+            return;
+
+        // Initial preparation for data copy from GPU to CPU
+        if (m_asyncAllocator.get() == nullptr)
+            m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(deviceId));
+
+		m_asyncGpuDataTransferers.clear();
+        m_ayncIntermediateCPUBuffers.clear();
+        for (size_t i = 0; i < gradients.size(); ++i)
+        {
+            // Make sure none of the gradient matrixes are sparse - we currently do not support aggregation of sparse gradient matrices
+            if (gradients[i]->GetMatrixType() != DENSE)
+                RuntimeError("Gradient aggregation for sparse gradient matrices is currently unsupported!");
+
+            // TODO: make these operations thread safety
+            m_asyncGpuDataTransferers.push_back(std::make_unique<GPUDataTransferer>(deviceId, true));
+            m_ayncIntermediateCPUBuffers.push_back(SyncAllocateIntermediateBuffer(deviceId, gradients[i]->GetNumElements()));
+        }
+    }
+
     void AggregateGradientsImpl(const std::vector<Matrix<ElemType>*>& gradients, DistGradHeader* headerCPU, bool showSyncPerfStats)
     {
         Timer aggregationTimer;
@@ -323,13 +442,13 @@ private:
             }
         }
 
-		// detail profile
-		std::chrono::time_point<std::chrono::system_clock> sdStartTime;
+        // detail profile
+        std::chrono::time_point<std::chrono::system_clock> sdStartTime;
         std::chrono::time_point<std::chrono::system_clock> sdEndTime;
 
         sdStartTime = std::chrono::system_clock::now();
 
-    // Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
+        // Copy all gradient data into a single contiguous buffer, if additional continous buffer allocated
         size_t offset = 0;
         for (size_t i : m_packedGradientsIndex)
         {
@@ -337,7 +456,7 @@ private:
             offset += gradients[i]->GetNumElements();
         }
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggCopyGradDataToBufferTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -345,7 +464,7 @@ private:
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Initiate receive of the header on the main node
+        // Initiate receive of the header on the main node
         std::vector<MPI_Request> recvHeaderRequests(NumProc() - 1);
         if (m_mpi->IsMainNode())
         {
@@ -362,7 +481,7 @@ private:
         if (!m_mpi->IsMainNode())
             m_mpi->Isend(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank(), numGradMatrices, &sendHeaderRequest) || MpiFail("MPI_Isend");
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggInitRecvHeaderAndSendNodes += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -378,14 +497,14 @@ private:
         if (numGradientIndex > 0)
         {
             if (strcmp(Chashu::detailProfile, "TRUE") == 0)
-			{
+            {
                 if (profileCnt % 100 == 0)
                 {
                     LOGPRINTF(stderr, "AggregateGradientsImpl: m_mpi->UseGpuGdr() = %d\n", m_mpi->UseGpuGdr());
                     LOGPRINTF(stderr, "AggregateGradientsImpl: deviceId = %d\n", deviceId);
                     LOGPRINTF(stderr, "AggregateGradientsImpl: m_nccl->IsSupported() = %d\n", m_nccl->IsSupported());
                 }
-			}
+            }
 
             // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
             if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported())
@@ -458,10 +577,10 @@ private:
             else if (!m_nccl->IsSupported())
             {
                 if (strcmp(Chashu::detailProfile, "TRUE") == 0)
-				{
+                {
                     if (profileCnt++ % 100 == 0)
                         LOGPRINTF(stderr, "AggregateGradientsImpl Branch2[non-NCCL, using CPU, using GDR] : m_nccl->IsSupported() == false \n");
-				}
+                }
 
                 ElemType* reductionBuffer;
                 for (size_t i : m_gradientIndexToAggregate)
@@ -490,7 +609,7 @@ private:
                     if (profileCnt++ % 100 == 0)
                         LOGPRINTF(stderr, "AggregateGradientsImpl Branch3 : m_nccl->IsSupported() == true \n");
 
-					sdStartTime = std::chrono::system_clock::now();
+                    sdStartTime = std::chrono::system_clock::now();
                 }
 
                 std::vector<Matrix<ElemType>*> ncclReduceGradients;
@@ -500,7 +619,7 @@ private:
                 }
                 m_nccl->AllReduce(ncclReduceGradients);
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     sdEndTime = std::chrono::system_clock::now();
                     Chashu::aggNCCLAllReduceTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -508,12 +627,12 @@ private:
             }
         }
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // On the main node wait for the headers to arrive and aggregate
+        // On the main node wait for the headers to arrive and aggregate
         if (m_mpi->IsMainNode())
         {
             size_t numNodesHeadersReceivedFrom = 0;
@@ -534,18 +653,18 @@ private:
             assert(numNodesHeadersReceivedFrom == (NumProc() - 1));
         }
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggMainNodeWaitAndAggTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
 
-			sdStartTime = std::chrono::system_clock::now();
+            sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Broadcast the aggregated header to all nodes
+        // Broadcast the aggregated header to all nodes
         m_mpi->Bcast(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank());
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggMPIBcastTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -557,7 +676,7 @@ private:
         {
             m_nccl->Sync();
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::aggNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -580,12 +699,12 @@ private:
             }
         }
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Copy data back to the packed gradients from the continous buffer
+        // Copy data back to the packed gradients from the continous buffer
         offset = 0;
         for (size_t i : m_packedGradientsIndex)
         {
@@ -601,11 +720,11 @@ private:
             sdStartTime = std::chrono::system_clock::now();
         }
 
-    // Wait for completion of the async send requests
+        // Wait for completion of the async send requests
         if (!m_mpi->IsMainNode())
             m_mpi->Wait(&sendHeaderRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdEndTime = std::chrono::system_clock::now();
             Chashu::aggMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -617,6 +736,152 @@ private:
             double gradientAggregationTime = aggregationTimer.ElapsedSeconds();
             fprintf(stderr, "Actual gradient aggregation time: %.6g\n", gradientAggregationTime);
         }
+    }
+
+    void AsyncAggreagateGradientsImpl(const std::vector<Matrix<ElemType>*>& gradients)
+    {
+        int deviceId = gradients[0]->GetDeviceId();
+
+        // New aggregation pipeline for non-GDR, perform sync allreduce on the gradient data
+        // For CPU, still use async allreduce
+        std::vector<MPI_Request> allReduceRequests;
+        size_t allReduceIndex = 0;
+        size_t numGradAgg = gradients.size();
+        if (numGradAgg > 0)
+            return;
+
+		// sync main stream
+        cudaStreamSynchronize(cudaStreamDefault);
+        // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
+        if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported())
+        {
+            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
+            {
+                Matrix<ElemType>* gpuCopyBuffer = gradients[gradIndex];
+                // Async D-to-H copy (next gradient)
+                m_asyncGpuDataTransferers[gradIndex]->CopyGPUToCPUAsync(gpuCopyBuffer->Data(), gpuCopyBuffer->GetNumElements(), m_ayncIntermediateCPUBuffers[gradIndex].get());
+            }
+
+            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
+            {
+                // Wait for previous copy
+                m_asyncGpuDataTransferers[gradIndex]->WaitForCopyGPUToCPUAsync();
+
+                // Allreduce
+                ElemType* reductionBuffer = m_ayncIntermediateCPUBuffers[gradIndex].get();
+                m_mpi->AllReduce(reductionBuffer, gradients[gradIndex]->GetNumElements());
+
+                m_asyncGpuDataTransferers[gradIndex]->CopyCPUToGPUAsync(m_ayncIntermediateCPUBuffers[gradIndex].get(), gradients[gradIndex]->GetNumElements(), gradients[gradIndex]->Data());
+                ++allReduceIndex;
+            }
+        }
+        // non-NCCL, using CPU, using GDR
+        else if (!m_nccl->IsSupported())
+        {
+            ElemType* reductionBuffer;
+            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
+            {
+                allReduceRequests.push_back(MPI_Request());
+                reductionBuffer = gradients[gradIndex]->Data();
+                // CPU
+                if (m_mpi->UseGpuGdr() == 0)
+                {
+                    m_mpi->Iallreduce(MPI_IN_PLACE, reductionBuffer, gradients[gradIndex]->GetNumElements(),
+                                      MPIWrapper::GetDataType(reductionBuffer), MPI_SUM, &allReduceRequests.back()) ||
+                        MpiFail("MPI_Iallreduce");
+                    ++allReduceIndex;
+                }
+                // GDR && GPU
+                else if (deviceId != CPUDEVICE)
+                {
+                    m_mpi->AllReduce(reductionBuffer, gradients[gradIndex]->GetNumElements());
+                }
+            }
+        }
+        else if (m_nccl->IsSupported())
+        {
+            std::vector<Matrix<ElemType>*> ncclReduceGradients;
+            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
+                ncclReduceGradients.push_back(gradients[gradIndex]);
+
+            m_nccl->AllReduce(ncclReduceGradients);
+        }
+
+        if (m_nccl->IsSupported())
+        {
+            m_nccl->Sync();
+        }
+        // Non-GDR && GPU
+        else if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE))
+        {
+            // Wait for async CPU-to-GPU copy (non-GDR)
+            for (size_t i = 0; i < allReduceIndex; ++i)
+                m_asyncGpuDataTransferers[i]->WaitForCopyCPUToGPUAsync();
+        }
+        // CPU
+        else if (m_mpi->UseGpuGdr() == 0)
+        {
+            // Wait for the Iallreduce operations to finish
+            for (size_t i = 0; i < allReduceIndex; ++i)
+            {
+                m_mpi->Wait(&allReduceRequests[i], MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
+            }
+        }
+    }
+
+    void AsyncAggregateGradHeaderImpl(DistGradHeader* headerCPU)
+    {
+        int numHeaderSample = headerCPU->numSamples;
+        if (numHeaderSample == 0)
+        {
+            assert(headerCPU->criterion == 0.0);
+            assert(headerCPU->numSamplesWithLabel == 0);
+            for (int i = 0; i < headerCPU->numEvalNode; ++i)
+                assert(headerCPU->evalErrors[i].first == 0 && headerCPU->evalErrors[i].second == 0);
+        }
+
+        // Initiate receive of the header on the main node
+        std::vector<MPI_Request> recvHeaderRequests(NumProc() - 1);
+        if (m_mpi->IsMainNode())
+        {
+            for (size_t j = 0; j < NumProc() - 1; ++j)
+            {
+                int source = (j >= MyRank()) ? (j + 1) : j;
+                // We use a tag of 'numGradMatrices' for the pre-aggregation header
+                m_mpi->Irecv(m_recvHeaders[j], m_recvHeaders[j]->Size(), MPI_CHAR, source, numHeaderSample, &(recvHeaderRequests[j])) || MpiFail("MPI_Irecv");
+            }
+        }
+
+        // Send the headers from all nodes but the main node
+        MPI_Request sendHeaderRequest;
+        if (!m_mpi->IsMainNode())
+            m_mpi->Isend(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank(), numHeaderSample, &sendHeaderRequest) || MpiFail("MPI_Isend");
+
+        // On the main node wait for the headers to arrive and aggregate
+        if (m_mpi->IsMainNode())
+        {
+            size_t numNodesHeadersReceivedFrom = 0;
+            while (numNodesHeadersReceivedFrom < (NumProc() - 1))
+            {
+                int idx = MPI_UNDEFINED;
+                m_mpi->Waitany(recvHeaderRequests.size(), recvHeaderRequests.data(), &idx, MPI_STATUS_IGNORE) || MpiFail("MPI_Waitany");
+                if (idx == MPI_UNDEFINED)
+                    break;
+
+                ++numNodesHeadersReceivedFrom;
+
+                headerCPU->Aggregate(m_recvHeaders[idx], true);
+            }
+
+            assert(numNodesHeadersReceivedFrom == (NumProc() - 1));
+        }
+
+        // Broadcast the aggregated header to all nodes
+        m_mpi->Bcast(headerCPU, headerCPU->Size(), MPI_CHAR, m_mpi->MainNodeRank());
+
+        // Wait for completion of the async send requests
+        if (!m_mpi->IsMainNode())
+            m_mpi->Wait(&sendHeaderRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
     }
 
     bool DistributedCheck(size_t minibatchSize, size_t processNum)
@@ -647,12 +912,15 @@ private:
                 m_allocator.reset(new CUDAPageLockedMemAllocator(deviceId));
             m_intermediateDistributedCPUBuffer1 = AllocateIntermediateBuffer(deviceId, bufferSize);
             m_intermediateDistributedCPUBuffer2 = AllocateIntermediateBuffer(deviceId, bufferSize);
+
+			if (m_asyncAllocator.get() == nullptr)
+                m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(deviceId));
         }
     }
 
     void DistributedAllGather(const Matrix<ElemType>& distributedMatrix, Matrix<ElemType>& gatheredMatrix, size_t count)
     {
-		// detail profile
+        // detail profile
         std::chrono::time_point<std::chrono::system_clock> sdStartTime;
         std::chrono::time_point<std::chrono::system_clock> sdEndTime;
 
@@ -674,7 +942,7 @@ private:
             m_mpi->AllGather(m_intermediateDistributedCPUBuffer1.get(), count, m_intermediateDistributedCPUBuffer2.get(), count);
             cudaMemcpy(gatheredMatrixBuffer, m_intermediateDistributedCPUBuffer2.get(), gatheredMatrix.GetNumElements() * sizeof(ElemType), cudaMemcpyHostToDevice);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdCudaMemcpyAndMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -700,7 +968,7 @@ private:
                                   MPIWrapper::GetDataType(distributedMatrixBuffer), &allGatherRequest) ||
                     MpiFail("MPI_Iallgather");
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     sdEndTime = std::chrono::system_clock::now();
                     Chashu::sdMPIIallgatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -716,7 +984,7 @@ private:
 
                 m_mpi->AllGather(distributedMatrixBuffer, count, gatheredMatrixBuffer, count);
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     sdEndTime = std::chrono::system_clock::now();
                     Chashu::sdMPIAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -736,7 +1004,7 @@ private:
 
             m_nccl->AllGather(distributedMatrixBuffer, gatheredMatrixBuffer, count);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdNCCLAllGatherTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -745,7 +1013,7 @@ private:
         else
             LogicError("LogicError in SimpleDistGradAggregator::DistributedAllGather");
 
-		if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+        if (strcmp(Chashu::detailProfile, "TRUE") == 0)
         {
             sdStartTime = std::chrono::system_clock::now();
         }
@@ -754,7 +1022,7 @@ private:
         {
             m_nccl->Sync();
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdNCCLSyncTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -767,7 +1035,7 @@ private:
         {
             m_mpi->Wait(&allGatherRequest, MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait"); // Wait for the Iallreduce operations to finish
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 sdEndTime = std::chrono::system_clock::now();
                 Chashu::sdMPIWaitTime += (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
@@ -826,6 +1094,11 @@ private:
         else
             LogicError("LogicError in SimpleDistGradAggregator::DistributedAllReduce");
     }
+
+private:
+    std::unique_ptr<CUDAPageLockedMemAllocator> m_asyncAllocator;
+    std::vector<std::unique_ptr<GPUDataTransferer>> m_asyncGpuDataTransferers;
+    std::vector<std::shared_ptr<ElemType>> m_ayncIntermediateCPUBuffers;
 
 private:
     std::unique_ptr<CUDAPageLockedMemAllocator> m_allocator;

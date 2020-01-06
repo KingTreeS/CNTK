@@ -135,9 +135,11 @@ enum CopyNodeFlags // flags to be passed to the CopyTo() function
 // =======================================================================
 
 class ComputationNodeBase;
+
 struct /*interface*/ IComputationNode
 {
     typedef shared_ptr<ComputationNodeBase> ComputationNodeBasePtr;
+    typedef void (*AsyncFun)(const ComputationNodeBasePtr&);
 
     // --- these must be implemented by each node
 
@@ -166,6 +168,7 @@ struct /*interface*/ IComputationNode
     // --- this is meant to be overridden by ControlFlowNodes
 
     virtual void Backprop(const FrameRange& fr, bool childrenInThisLoop, bool childrenInOuterLoop) = 0;
+    virtual void AsyncBackprop(const FrameRange& fr, AsyncFun backpropAggFun) = 0;
 
     // --- optional overrides that add functionality
 
@@ -947,6 +950,12 @@ public:
     virtual void /*IComputationNode::*/ BeginTiming(bool) override {}
     virtual void /*IComputationNode::*/ EndTiming(bool) override {}
 
+    virtual void /*IComputationNode::*/ AsyncBackprop(const FrameRange& fr, AsyncFun backpropAggFun) override
+    {
+        if (fr.IsAllFrames() && backpropAggFun != nullptr)
+            return;
+    }
+
     // check whether a node is out of date w.r.t. its children, for lazy evaluation
     // If this returns true, node must be evaluated to update m_value.
     // This is virtual because it is overridden by traversal nodes, which would check all their nodes' inputs.
@@ -1151,6 +1160,7 @@ protected:
     bool m_outputNeededDuringBackprop;                  // indicates whether the output value of the node is needed during backprop
 };
 typedef ComputationNodeBase::ComputationNodeBasePtr ComputationNodeBasePtr;
+typedef IComputationNode::AsyncFun AsyncFun;
 
 // =======================================================================
 // NumInputs -- little helper interface to allow derived Node classes to

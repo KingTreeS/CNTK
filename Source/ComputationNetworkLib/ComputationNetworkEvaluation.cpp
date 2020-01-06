@@ -21,9 +21,12 @@
 
 using namespace std;
 
-
-namespace Microsoft { namespace MSR { namespace CNTK {
-
+namespace Microsoft
+{
+namespace MSR
+{
+namespace CNTK
+{
 
 // This source file contains methods related to evaluation (forward prop, backprop), network validation, and matrix memory allocation (memory sharing).
 
@@ -89,6 +92,22 @@ void ComputationNetwork::Backprop(const ComputationNodeBasePtr rootNode) // trai
 
     // backpropagate through the network
     GetNestedNetwork(rootNode)->Backprop(FrameRange(nullptr), true, true);
+}
+
+void ComputationNetwork::AsyncBackprop(const ComputationNodeBasePtr rootNode, AsyncFun backpropAggFun)
+{
+    if (!Environment().IsTraining())
+        LogicError("Backprop: Requires network is to be in training mode.");
+
+    // initialize root gradient with a scalar value of 1.0
+    if (!SetRootGradientToScalarOne<float>(rootNode) && !SetRootGradientToScalarOne<double>(rootNode))
+        LogicError("Backprop: Training criterion is neither ComputationNode<float> nor ComputationNode<double>.");
+
+    // reset all gradients below rootNode to zero (actually, internally, this is lazy, but we don't care here)
+    ZeroInputGradients(rootNode);
+
+    // backpropagate through the network
+    GetNestedNetwork(rootNode)->AsyncBackprop(FrameRange(nullptr), backpropAggFun);
 }
 
 void ComputationNetwork::FormNestedNetwork(const ComputationNodeBasePtr& rootNode)
@@ -162,7 +181,6 @@ ComputationNetwork::PARTraversalFlowControlNode::PARTraversalFlowControlNode(con
     }
 }
 
-
 /*virtual*/ void ComputationNetwork::PARTraversalFlowControlNode::ForwardProp(const FrameRange& fr) /*override*/
 {
     for (auto& node : m_nestedNodes)
@@ -199,6 +217,28 @@ ComputationNetwork::PARTraversalFlowControlNode::PARTraversalFlowControlNode(con
             DumpNode(node, /*dumpGradient=*/true);
     }
 }
+
+/*virtual*/ void ComputationNetwork::PARTraversalFlowControlNode::AsyncBackprop(const FrameRange& fr, AsyncFun backpropAggFun) /*override*/
+{
+    // process nodes in pre-determined order
+    for (auto pnode = m_nestedNodes.rbegin(); pnode != m_nestedNodes.rend(); pnode++) // iterate backwards over evaluation order
+    {
+        auto& node = *pnode;
+
+        node->BeginBackprop();
+        node->BeginTiming(true /*backward*/);
+        node->Backprop(fr.WithLayout(node->GetMBLayout()), true /*childrenInThisLoop*/, true /*childrenInOuterLoop*/);
+        node->EndTiming(true /*backward*/);
+        node->EndBackprop();
+
+        backpropAggFun(node);
+
+        // Extreme Tracing, part 2/4
+        if (node->HasEnvironmentPtr() && node->Environment().ShouldDumpNode() && node->NeedsGradient())
+            DumpNode(node, /*dumpGradient=*/true);
+    }
+}
+
 /*virtual*/ void ComputationNetwork::PARTraversalFlowControlNode::RequestMatricesBeforeForwardProp(MatrixPool& matrixPool) /*override*/
 {
 }
@@ -215,7 +255,7 @@ ComputationNetwork::PARTraversalFlowControlNode::PARTraversalFlowControlNode(con
 {
 }
 
-template<typename ElemType>
+template <typename ElemType>
 bool TypedDumpNode(shared_ptr<ComputationNode<ElemType>> node, bool dumpGradient)
 {
     if (!node)
@@ -227,9 +267,9 @@ bool TypedDumpNode(shared_ptr<ComputationNode<ElemType>> node, bool dumpGradient
     bool concise = !(node->Environment().IsLogLevelNodeTrace());
 
     fprintf(stderr, "Dump --> %s%s\n", node->FormatOperationPrototype("").c_str(), dumpGradient ? " Grad" : "");
-    node->WriteMinibatchWithFormatting(stderr, FrameRange(), SIZE_MAX, SIZE_MAX, false/*transpose*/, /*isCategoryLabel=*/false, /*isSparse=*/false, std::vector<std::string>(),
-        ""/*sequenceSeparator*/, "  "/*sequencePrologue*/, "\n"/*sequenceEpilogue*/, " "/*elementSeparator*/, "\n  "/*sampleSeparator*/,
-        "%13.10f"/*valueFormatString*/, dumpGradient, concise);
+    node->WriteMinibatchWithFormatting(stderr, FrameRange(), SIZE_MAX, SIZE_MAX, false /*transpose*/, /*isCategoryLabel=*/false, /*isSparse=*/false, std::vector<std::string>(),
+                                       "" /*sequenceSeparator*/, "  " /*sequencePrologue*/, "\n" /*sequenceEpilogue*/, " " /*elementSeparator*/, "\n  " /*sampleSeparator*/,
+                                       "%13.10f" /*valueFormatString*/, dumpGradient, concise);
     return true;
 }
 
@@ -237,11 +277,14 @@ bool TypedDumpNode(shared_ptr<ComputationNode<ElemType>> node, bool dumpGradient
 static bool DumpNode(ComputationNodeBasePtr nodep, bool dumpGradient)
 {
     let nodef = dynamic_pointer_cast<ComputationNode<float>>(nodep);
-    if (nodef) return TypedDumpNode<float>(nodef, dumpGradient);
+    if (nodef)
+        return TypedDumpNode<float>(nodef, dumpGradient);
     let noded = dynamic_pointer_cast<ComputationNode<double>>(nodep);
-    if (noded) return TypedDumpNode<double>(noded, dumpGradient);
+    if (noded)
+        return TypedDumpNode<double>(noded, dumpGradient);
     let nodeh = dynamic_pointer_cast<ComputationNode<half>>(nodep);
-    if (nodeh) return TypedDumpNode<half>(nodeh, dumpGradient);
+    if (nodeh)
+        return TypedDumpNode<half>(nodeh, dumpGradient);
     return false;
 }
 
@@ -261,7 +304,7 @@ static bool DumpNode(ComputationNodeBasePtr nodep, bool dumpGradient)
     {
         if (node->GetMBLayout() != GetMBLayout())
             LogicError("Evaluate: All nodes inside a recurrent loop must have a layout that is identical; mismatch found for nodes '%ls' (%ls) vs. '%ls' (%ls)",
-                       node            ->NodeName().c_str(), node            ->GetMBLayoutAxisString().c_str(),
+                       node->NodeName().c_str(), node->GetMBLayoutAxisString().c_str(),
                        m_nestedNodes[0]->NodeName().c_str(), m_nestedNodes[0]->GetMBLayoutAxisString().c_str());
     }
 
@@ -415,7 +458,7 @@ bool ComputationNetwork::SEQTraversalFlowControlNode::IsOutOfDateWrtInputs() con
         if (ptr->IsOutOfDateWrtInputs() &&
             ptr->OperationName() != OperationNameOf(PastValueNode) &&
             ptr->OperationName() != OperationNameOf(FutureValueNode))
-            // TODO: when ShiftNode lands, check this as well. Ideally just test whether ptr is a IRecurrentNode
+        // TODO: when ShiftNode lands, check this as well. Ideally just test whether ptr is a IRecurrentNode
         {
             return true;
         }
@@ -512,7 +555,7 @@ void ComputationNetwork::CompileNetwork()
 
     if (TraceLevel() > 0)
     {
-        fprintf(stderr, "\n%d roots:\n", (int)m_allRoots.size());
+        fprintf(stderr, "\n%d roots:\n", (int) m_allRoots.size());
         for (const auto& root : m_allRoots)
             fprintf(stderr, "\t%ls = %ls()\n", root->NodeName().c_str(), root->OperationName().c_str());
     }
@@ -614,8 +657,7 @@ void ComputationNetwork::DetermineSetOfAllRoots()
 
     // and bring the roots into a well-defined order
     // I did observe different order depending on complexity of non-Node BrainScript expressions.
-    sort(m_allRoots.begin(), m_allRoots.end(),[](const ComputationNodeBasePtr& a, const ComputationNodeBasePtr& b)
-    {
+    sort(m_allRoots.begin(), m_allRoots.end(), [](const ComputationNodeBasePtr& a, const ComputationNodeBasePtr& b) {
         return a->NodeName() < b->NodeName();
     });
 }
@@ -634,7 +676,7 @@ void ComputationNetwork::ResetMBLayouts()
         node->LinkToMBLayout(nullptr);
 
     // DynamicAxis nodes are (apart from the soon-to-be-deprecated network-wide MBLayout) the main holders of MBLayouts. Initialize them.
-    // The only other instances are nodes that change the MBLayout, like WhereNode. 
+    // The only other instances are nodes that change the MBLayout, like WhereNode.
     for (auto node : GetNodesWithType(L"DynamicAxis"))
         node->LinkToMBLayout(make_shared<MBLayout>(1, 0, node->GetName()));
 
@@ -703,12 +745,12 @@ void ComputationNetwork::ValidateNetwork()
     while (toValidate > 0)
     {
         if (TraceLevel() > 0)
-        fprintf(stderr, "\nValidating network. %d nodes to process in pass %d.\n\n", (int) toValidate, (int) pass);
+            fprintf(stderr, "\nValidating network. %d nodes to process in pass %d.\n\n", (int) toValidate, (int) pass);
         toValidate = ValidateNodes(nodes, /*isFirstPass=*/pass == 1, false /*isFinalValidationPass*/);
         pass++;
     }
     if (TraceLevel() > 0)
-    fprintf(stderr, "\nValidating network, final pass.\n\n");
+        fprintf(stderr, "\nValidating network, final pass.\n\n");
     toValidate = ValidateNodes(nodes, /*isFirstPass=*/pass == 1, true /*isFinalValidationPass*/);
     if (toValidate != 0)
         LogicError("ValidateSubNetwork: ValidateNodes(true) unexpectedly returned with work left to do.");
@@ -830,13 +872,13 @@ size_t ComputationNetwork::ValidateNodes(list<ComputationNodeBasePtr> nodes, boo
             {
                 unchanged = !ValidateNode(node, isFinalValidationPass);
                 string updatedPrototype = node->FormatOperationPrototype("");
-#if 0           // print prototype in final validation pass. Problematic for tracking down validation errors in loops.
+#if 0 // print prototype in final validation pass. Problematic for tracking down validation errors in loops.
                 unchanged;
                 if (isFinalValidationPass)
-#else           // print prototype upon every change (useful for debugging)
+#else // print prototype upon every change (useful for debugging)
                 if (isFirstPass || !unchanged || prevPrototype != updatedPrototype)
 #endif
-                    if (TraceLevel() > 0)
+                if (TraceLevel() > 0)
                     fprintf(stderr, "Validating --> %s\n", updatedPrototype.c_str());
             }
             catch (...) // if validation failed then print the prototype anyway so one can see the input args
@@ -885,7 +927,7 @@ void ComputationNetwork::MarkValueNonSharableNodes()
 
         // Mark the UserDefinedV2FunctionNode and all its inputs as ValueNonShareable, since
         // the inputs and outputs of a UDF may be externally preserved by the UDF implementation
-        // for bakcpropagation and thus reusing them within the network is not possible as 
+        // for bakcpropagation and thus reusing them within the network is not possible as
         // we do not control when the user actually releases the input/output Matrices that
         // they may have help in the backprop state returned from the UDF's forward pass.
         bool isUserDefinedV2FunctionNode = (node->OperationName() == L"UserDefinedV2Function");
@@ -983,7 +1025,8 @@ set<ComputationNodeBasePtr> ComputationNetwork::ExtractNodesWhichAccumulateResul
                     break;
                 }
             }
-            if (skipNode) continue;
+            if (skipNode)
+                continue;
             if (areAllLeafDescendantsLearnableNodes)
                 allLeafDescendantsAreLearnableParameters.insert(node);
             if (hasAccumulatorInput)
@@ -1003,7 +1046,7 @@ set<ComputationNodeBasePtr> ComputationNetwork::ExtractNodesWhichAccumulateResul
 // print memory-sharing information to log
 void ComputationNetwork::PrintMemorySharingStructure(const vector<ComputationNodeBasePtr>& nodes)
 {
-    map <const MatrixBase*, set<wstring>> memSharingStructure;
+    map<const MatrixBase*, set<wstring>> memSharingStructure;
     size_t numMatrices = 0;
     for (const auto& node : nodes)
     {
@@ -1022,13 +1065,13 @@ void ComputationNetwork::PrintMemorySharingStructure(const vector<ComputationNod
     {
         if (item.second.size() < 2) // unshared matrices
             numUnshared++;
-        else                        // shared matrices
+        else // shared matrices
             numShared++;
     }
 
-    fprintf(stderr, "\nMemory Sharing: Out of %d matrices, %d are shared as %d, and %d are not shared.\n", (int)numMatrices, (int)(numMatrices - numUnshared), (int)numShared, (int)numUnshared);
+    fprintf(stderr, "\nMemory Sharing: Out of %d matrices, %d are shared as %d, and %d are not shared.\n", (int) numMatrices, (int) (numMatrices - numUnshared), (int) numShared, (int) numUnshared);
 
-    fprintf(stderr, "\nHere are the ones that share memory:\n"); 
+    fprintf(stderr, "\nHere are the ones that share memory:\n");
     for (const auto& item : memSharingStructure)
     {
         if (item.second.size() >= 2)
@@ -1053,12 +1096,11 @@ void ComputationNetwork::PrintMemorySharingStructure(const vector<ComputationNod
     {
         if (item.second.size() < 2)
         {
-            fprintf(stderr, "\t{%ls}\n", item.second.begin()->c_str()); 
+            fprintf(stderr, "\t{%ls}\n", item.second.begin()->c_str());
         }
     }
     fprintf(stderr, "\n");
 }
-
 
 // this function will need to be called before actual validation and execution to
 // predetermine how to share matrices to reduce memory usage.
@@ -1225,11 +1267,11 @@ void ComputationNetwork::AllocateAllMatrices(const std::vector<ComputationNodeBa
         // print the memory aliasing info
         if (TraceLevel() > 0 && compactGradientAliasRootMap.size() > 0)
         {
-            fprintf(stderr, "\nGradient Memory Aliasing: %d are aliased.\n", (int)compactGradientAliasRootMap.size());
+            fprintf(stderr, "\nGradient Memory Aliasing: %d are aliased.\n", (int) compactGradientAliasRootMap.size());
             for (const auto pair : compactGradientAliasRootMap)
             {
-                auto child = (const ComputationNodeBase*)pair.first;
-                auto parent = (const ComputationNodeBase*)pair.second;
+                auto child = (const ComputationNodeBase*) pair.first;
+                auto parent = (const ComputationNodeBase*) pair.second;
                 if (child != parent)
                     fprintf(stderr, "\t%S (gradient) reuses %S (gradient)\n", child->GetName().c_str(), parent->GetName().c_str());
             }
@@ -1271,15 +1313,15 @@ void ComputationNetwork::AllocateAllMatrices(const std::vector<ComputationNodeBa
         }
     }
 
-    m_matrixPool.OptimizedMemoryAllocation(); 
+    m_matrixPool.OptimizedMemoryAllocation();
     m_areMatricesAllocated = true;
 
     // TO DO: At the time of AllocateAllMatrices we don't know the minibatch size. In theory one may allocate memory again once we start to receive
-    // data from the reader (and the minibatch size is known). For some problems, minibatch size can change constantly, and there needs to be a 
-    // tradeoff in deciding how frequent to run optimized memory allocation. For now, we do it only once at the very beginning for speed concerns. 
+    // data from the reader (and the minibatch size is known). For some problems, minibatch size can change constantly, and there needs to be a
+    // tradeoff in deciding how frequent to run optimized memory allocation. For now, we do it only once at the very beginning for speed concerns.
 
-    // TO DO: when some matrices are sparse, the memory size request may be wrong. One may need to call OptimizedMemoryAllocation later again 
-    // if the requests of sparse allocation and release are re-processed correctly. Future work. 
+    // TO DO: when some matrices are sparse, the memory size request may be wrong. One may need to call OptimizedMemoryAllocation later again
+    // if the requests of sparse allocation and release are re-processed correctly. Future work.
 
     // print the memory sharing structure
     if (TraceLevel() > 0)
@@ -1300,4 +1342,6 @@ void ComputationNetwork::ReleaseMatricesAfterEvalForChildren(ComputationNodeBase
     }
 }
 
-}}}
+} // namespace CNTK
+} // namespace MSR
+} // namespace Microsoft

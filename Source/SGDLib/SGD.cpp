@@ -1344,8 +1344,8 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
                 fprintf(stderr, "Iteration [%d-%d]: forward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, forwardTime);
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
-				{
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                {
                     fprintf(stderr, "ConvolutionalNodes.h | class ConvolutionNode | func ForwardProp:\n");
                     fprintf(stderr, "Iteration [%d-%d]: line 587: conv time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::convTime);
                     fprintf(stderr, "TrainingNodes.h | class DistributedAdditiveFullConnectionNode | func ForwardPropNonLooping:\n");
@@ -1368,12 +1368,12 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     fprintf(stderr, "Iteration [%d-%d]: line 481: softmax second dist allreduce time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistAllReduceTwoTime);
                     fprintf(stderr, "Iteration [%d-%d]: line 493: softmax dist softmax time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistSoftTime);
                     fprintf(stderr, "Iteration [%d-%d]: line 502: softmax dist cross entropy time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::tnSoftMaxDistCrossEntropyTime);
-				}
+                }
 
-				fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
-				fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
+                fprintf(stderr, "Iteration [%d-%d]: backward time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, backwardTime);
+                fprintf(stderr, "Iteration [%d-%d]: aggregate time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, aggregateTime);
 
-				if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+                if (strcmp(Chashu::detailProfile, "TRUE") == 0)
                 {
                     fprintf(stderr, "SGD.h | class SGD | func TrainOneEpoch:\n");
                     fprintf(stderr, "Iteration [%d-%d]: line 1555: lazily form the list of smoothedGradients to exchange time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggFormListOfSmoothedGradTime);
@@ -1393,7 +1393,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     fprintf(stderr, "Iteration [%d-%d]: line 592: Wait for completion of the async send requests time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, Chashu::aggMPIWaitTime);
                 }
 
-				fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, updateTime);
+                fprintf(stderr, "Iteration [%d-%d]: update time = %.8gs\n", (int) (m_lrapiInfo.iter - m_lrapiInfo.numItersToShowLR + 1), (int) m_lrapiInfo.iter, updateTime);
                 prepareTime = 0.0;
                 forwardTime = 0.0;
                 backwardTime = 0.0;
@@ -1514,7 +1514,19 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 startTime = std::chrono::system_clock::now();
 #endif
                 if (learnRatePerSample > 0.01 * m_minLearnRate) // only compute gradient when learning rate is large enough
-                    net->Backprop(criterionNodes[0]);
+                {
+#ifdef USE_NCCL
+                    if (ASYNCNCCL::m_asyncNccl == nullptr)
+                        ASYNCNCCL::m_asyncNccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi));
+
+                    AsyncFun backpropAgg = ASYNCNCCL::BackpropWithGradAggNccl;
+                    net->AsyncBackprop(criterionNodes[0], backpropAgg);
+#else
+                
+					net->Backprop(criterionNodes[0]);
+#endif
+				}
+
 #ifdef __PROFILE__
                 endTime = std::chrono::system_clock::now();
                 backwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
@@ -1577,9 +1589,10 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 if (iterCnt++ % 100 == 0)
                     LOGPRINTF(stderr, "Aggregation: Use gradient aggregation.\n");
 
-				aggStartTime = std::chrono::system_clock::now();
+                aggStartTime = std::chrono::system_clock::now();
             }
 
+#ifndef USE_NCCL
             // distributed gradient aggregation
             if (learnParamsGradients.size() == 0)
             {
@@ -1605,7 +1618,11 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 }
             }
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            m_distGradAgg->AsyncAggreagateGradients(learnParamsGradients);
+
+#endif // !USE_NCCL
+
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggFormListOfSmoothedGradTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1618,7 +1635,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 localEpochEvalErrors.Assign(i, numSamplesWithLabelOfNetwork);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggHoistCriterionToCPUAllreduceTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1634,7 +1651,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             for (size_t i = 0; i < evaluationNodes.size(); i++)
                 m_gradHeader->evalErrors[i] = localEpochEvalErrors.GetCriterion(i);
 
-			if (strcmp(Chashu::detailProfile, "TRUE") == 0)
+            if (strcmp(Chashu::detailProfile, "TRUE") == 0)
             {
                 aggEndTime = std::chrono::system_clock::now();
                 Chashu::aggCopyAllValToBeAggregatedToHeaderTime += (std::chrono::duration<double>(aggEndTime - aggStartTime)).count();
@@ -1642,7 +1659,8 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 
             // aggregate
             m_gradHeader->numEvalNode = evaluationNodes.size(); // TODO: rename numEvalNode (plural)
-            bool samplesProcessed = m_distGradAgg->AggregateGradients(learnParamsGradients, m_gradHeader.get(), isFirstMinibatch);
+            // bool samplesProcessed = m_distGradAgg->AggregateGradients(learnParamsGradients, m_gradHeader.get(), isFirstMinibatch);
+            bool samplesProcessed = m_distGradAgg->AsyncAggregateGradHeader(m_gradHeader.get());
             noMoreSamplesToProcess = !samplesProcessed;
             // read out the header--now everything is aggregated
             aggregateNumSamples = m_gradHeader->numSamples;
@@ -3774,7 +3792,7 @@ SGDParams::SGDParams(const ConfigRecordType& configSGD, size_t sizeofElemType)
                 }
                 else
                     m_modelAggregationBlockSize = 40000 * numMPIWorkers; // default value
-#if 1                                                                    // legacy option
+#if 1 // legacy option
                 if (configMASGD.Exists(L"syncFrequencyInFrames"))
                 {
                     if (configMASGD.Exists(L"blockSizePerWorker") || configMASGD.Exists(L"blockSize"))
