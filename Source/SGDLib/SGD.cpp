@@ -1516,14 +1516,16 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 if (learnRatePerSample > 0.01 * m_minLearnRate) // only compute gradient when learning rate is large enough
                 {
 #ifdef USE_NCCL
-                    if (ASYNCNCCL::m_asyncNccl == nullptr)
+                    if (ASYNCNCCL::m_asyncNccl.get() == nullptr)
                         ASYNCNCCL::m_asyncNccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi));
 
-                    AsyncFun backpropAgg = ASYNCNCCL::BackpropWithGradAggNccl;
+                    AsyncFun backpropAgg = ASYNCNCCL::BackpropWithGradAggNccl<ElemType>;
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
 #else
-                
-					net->Backprop(criterionNodes[0]);
+                    ASYNCMPI::m_asyncMpi = m_mpi;
+                    AsyncFun backpropAgg = ASYNCMPI::AsyncAggreagateGradients<ElemType>;
+                    net->AsyncBackprop(criterionNodes[0], backpropAgg);
+					//net->Backprop(criterionNodes[0]);
 #endif
 				}
 
@@ -1593,32 +1595,32 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
             }
 
 #ifndef USE_NCCL
-            // distributed gradient aggregation
-            if (learnParamsGradients.size() == 0)
-            {
-                // lazily form the list of smoothedGradients to exchange
-                learnParamsGradients.reserve(learnableNodes.size());
-                for (auto nodeIter = learnableNodes.begin(); nodeIter != learnableNodes.end(); nodeIter++)
-                {
-                    ComputationNodePtr node = dynamic_pointer_cast<ComputationNode<ElemType>>(*nodeIter);
-                    if (node->IsParameterUpdateRequired() && !node->m_distribute)
-                    {
-                        Matrix<ElemType>* currParamsGradient = &(node->Gradient()); // TODO: we can use shared_ptrs now
+            //// distributed gradient aggregation
+            //if (learnParamsGradients.size() == 0)
+            //{
+            //    // lazily form the list of smoothedGradients to exchange
+            //    learnParamsGradients.reserve(learnableNodes.size());
+            //    for (auto nodeIter = learnableNodes.begin(); nodeIter != learnableNodes.end(); nodeIter++)
+            //    {
+            //        ComputationNodePtr node = dynamic_pointer_cast<ComputationNode<ElemType>>(*nodeIter);
+            //        if (node->IsParameterUpdateRequired() && !node->m_distribute)
+            //        {
+            //            Matrix<ElemType>* currParamsGradient = &(node->Gradient()); // TODO: we can use shared_ptrs now
 
-                        // Sometimes, in parallel training, the current node may not get any samples to process
-                        // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
-                        if (currParamsGradient->GetNumCols() == 0)
-                        {
-                            Matrix<ElemType>* currParamsValues = &(node->Value());
-                            currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
-                        }
+            //            // Sometimes, in parallel training, the current node may not get any samples to process
+            //            // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
+            //            if (currParamsGradient->GetNumCols() == 0)
+            //            {
+            //                Matrix<ElemType>* currParamsValues = &(node->Value());
+            //                currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
+            //            }
 
-                        learnParamsGradients.push_back(currParamsGradient);
-                    }
-                }
-            }
+            //            learnParamsGradients.push_back(currParamsGradient);
+            //        }
+            //    }
+            //}
 
-            m_distGradAgg->AsyncAggreagateGradients(learnParamsGradients);
+            //m_distGradAgg->AsyncAggreagateGradients(learnParamsGradients);
 
 #endif // !USE_NCCL
 

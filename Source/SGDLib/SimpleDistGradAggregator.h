@@ -29,21 +29,8 @@ namespace CNTK
 #ifdef USE_NCCL
 namespace ASYNCNCCL
 {
-void SyncEvent(cudaEvent_t ev)
-{
-    auto rc = cudaEventQuery(ev);
-    if (rc != cudaErrorNotReady)
-    {
-        // if Event is ready then no need to wait
-        rc || "cudaEventQuery failed";
-        return;
-    }
-    // we must wait
-    cudaEventSynchronize(ev) || "cudaEventSynchronize failed";
-}
-
 template <typename ElemType>
-static void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
+void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
 {
     if (!node->NeedsGradient())
         return;
@@ -61,21 +48,143 @@ static void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
             currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
         }
 
-        // sync stream
+        // sync main stream
+        cudaEvent_t m_asyncEvent;
         cudaEventCreate(&m_asyncEvent);
         cudaEventRecord(m_asyncEvent);
-        SyncEvent(m_asyncEvent);
+
+        auto rc = cudaEventQuery(m_asyncEvent);
+        if (rc == cudaErrorNotReady)
+            cudaEventSynchronize(m_asyncEvent) || "cudaEventSynchronize failed";
 
         if (m_asyncNccl != nullptr)
-            m_asyncNccl->AllReduce(currParamsGradient);
+        {
+            std::vector<Matrix<ElemType>*> learningParamGrad;
+            learningParamGrad.push_back(currParamsGradient);
+            m_asyncNccl->AllReduce(learningParamGrad);
+        }
     }
 }
 
 // init in SGD
-static std::unique_ptr<NcclComm> m_asyncNccl = nullptr;
-static cudaEvent_t m_asyncEvent;
+static std::unique_ptr<NcclComm> m_asyncNccl;
 } // namespace ASYNCNCCL
 #endif
+
+namespace ASYNCMPI
+{
+static MPIWrapperPtr m_asyncMpi;
+static std::unique_ptr<CUDAPageLockedMemAllocator> m_asyncAllocator;
+
+template <typename ElemType>
+std::shared_ptr<ElemType> SyncAllocateIntermediateBuffer(int deviceID, size_t numElements)
+{
+    assert(deviceID >= 0);
+
+    // Use pinned memory for GPU devices for better copy performance
+    size_t totalSize = sizeof(ElemType) * numElements;
+    return std::shared_ptr<ElemType>((ElemType*) m_asyncAllocator->Malloc(totalSize), [deviceID](ElemType* p) {
+        m_asyncAllocator->Free(p);
+    });
+}
+
+template <typename ElemType>
+void AsyncAggreagateGradientsImpl(const std::vector<Matrix<ElemType>*> gradients)
+{
+    if (gradients.size() == 0)
+        return;
+
+    int deviceId = gradients[0]->GetDeviceId();
+    cudaSetDevice(deviceId);
+    // Initial preparation for data copy from GPU to CPU
+    if (m_asyncAllocator.get() == nullptr)
+        m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(deviceId));
+
+    std::vector<std::unique_ptr<GPUDataTransferer>> asyncGpuDataTransferers;
+    std::vector<std::shared_ptr<ElemType>> ayncIntermediateCPUBuffers;
+    size_t numGradAgg = gradients.size();
+    for (size_t i = 0; i < numGradAgg; ++i)
+    {
+        // Make sure none of the gradient matrixes are sparse - we currently do not support aggregation of sparse gradient matrices
+        if (gradients[i]->GetMatrixType() != DENSE)
+            RuntimeError("Gradient aggregation for sparse gradient matrices is currently unsupported!");
+
+        // TODO: make these operations thread safety
+        asyncGpuDataTransferers.push_back(std::make_unique<GPUDataTransferer>(deviceId, true));
+        ayncIntermediateCPUBuffers.push_back(SyncAllocateIntermediateBuffer<ElemType>(deviceId, gradients[i]->GetNumElements()));
+    }
+
+    // sync main stream
+
+    cudaEvent_t m_asyncEvent;
+    cudaEventCreate(&m_asyncEvent);
+    cudaEventRecord(m_asyncEvent);
+
+    auto rc = cudaEventQuery(m_asyncEvent);
+    if (rc == cudaErrorNotReady)
+        cudaEventSynchronize(m_asyncEvent) || "cudaEventSynchronize failed";
+
+    // New aggregation pipeline for non-GDR, perform sync allreduce on the gradient data
+    // For CPU, still use async allreduce
+    size_t allReduceIndex = 0;
+    // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
+    for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
+    {
+        Matrix<ElemType>* gpuCopyBuffer = gradients[gradIndex];
+        // Async D-to-H copy (next gradient)
+        asyncGpuDataTransferers[gradIndex]->CopyGPUToCPUAsync(gpuCopyBuffer->Data(), gpuCopyBuffer->GetNumElements(), ayncIntermediateCPUBuffers[gradIndex].get());
+
+        // Wait for previous copy
+        asyncGpuDataTransferers[gradIndex]->WaitForCopyGPUToCPUAsync();
+
+        // Allreduce
+        ElemType* reductionBuffer = ayncIntermediateCPUBuffers[gradIndex].get();
+        m_asyncMpi->AllReduce(reductionBuffer, gradients[gradIndex]->GetNumElements());
+
+        asyncGpuDataTransferers[gradIndex]->CopyCPUToGPUAsync(ayncIntermediateCPUBuffers[gradIndex].get(), gradients[gradIndex]->GetNumElements(), gradients[gradIndex]->Data());
+        ++allReduceIndex;
+    }
+
+    // Wait for async CPU-to-GPU copy (non-GDR)
+    for (size_t i = 0; i < allReduceIndex; ++i)
+        asyncGpuDataTransferers[i]->WaitForCopyCPUToGPUAsync();
+
+    asyncGpuDataTransferers.clear();
+    ayncIntermediateCPUBuffers.clear();
+    cudaEventDestroy(m_asyncEvent);
+}
+
+template <typename ElemType>
+void AsyncAggreagateGradients(const ComputationNodeBasePtr& node)
+{
+    if (m_asyncMpi->NumNodesInUse() == 1) // No need to aggregate anything.
+        return;
+
+    if (!node->NeedsGradient())
+        return;
+
+    shared_ptr<ComputationNode<ElemType>> gradNode = std::dynamic_pointer_cast<ComputationNode<ElemType>>(node);
+    if (gradNode->IsParameterUpdateRequired() && !gradNode->m_distribute)
+    {
+        Matrix<ElemType>* currParamsGradient = &(gradNode->Gradient()); // TODO: we can use shared_ptrs now
+
+        // Sometimes, in parallel training, the current node may not get any samples to process
+        // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
+        if (currParamsGradient->GetNumCols() == 0)
+        {
+            Matrix<ElemType>* currParamsValues = &(gradNode->Value());
+            currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
+        }
+
+        std::vector<Matrix<ElemType>*> learningParamGrad;
+        learningParamGrad.push_back(currParamsGradient);
+
+        // start a new thread
+        std::thread trd(AsyncAggreagateGradientsImpl<ElemType>, learningParamGrad);
+        trd.join();
+    }
+}
+} // namespace ASYNCMPI
 
 static size_t profileCnt = 0;
 
@@ -220,20 +329,6 @@ public:
         }
     }
 
-    void AsyncAggreagateGradients(const std::vector<Matrix<ElemType>*>& gradients) override
-    {
-        if (m_mpi->NumNodesInUse() == 1) // No need to aggregate anything.
-            return;
-
-        // Initialize NCCL
-        if (m_nccl == nullptr)
-            m_nccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi));
-
-        // Copy gpu data to cpu if need
-        AsyncResetData(gradients);
-        AsyncAggreagateGradientsImpl(gradients);
-    }
-
     bool AsyncAggregateGradHeader(DistGradHeader* headerCPU) override
     {
         if (m_mpi->NumNodesInUse() == 1) // No need to aggregate anything.
@@ -262,17 +357,6 @@ private:
         size_t totalSize = sizeof(ElemType) * numElements;
         return std::shared_ptr<ElemType>((ElemType*) m_allocator->Malloc(totalSize), [this, deviceID](ElemType* p) {
             m_allocator->Free(p);
-        });
-    }
-
-    std::shared_ptr<ElemType> SyncAllocateIntermediateBuffer(int deviceID, size_t numElements)
-    {
-        assert(deviceID >= 0);
-
-        // Use pinned memory for GPU devices for better copy performance
-        size_t totalSize = sizeof(ElemType) * numElements;
-        return std::shared_ptr<ElemType>((ElemType*) m_asyncAllocator->Malloc(totalSize), [this, deviceID](ElemType* p) {
-            m_asyncAllocator->Free(p);
         });
     }
 
@@ -397,7 +481,7 @@ private:
         if (m_asyncAllocator.get() == nullptr)
             m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(deviceId));
 
-		m_asyncGpuDataTransferers.clear();
+        m_asyncGpuDataTransferers.clear();
         m_ayncIntermediateCPUBuffers.clear();
         for (size_t i = 0; i < gradients.size(); ++i)
         {
@@ -738,97 +822,6 @@ private:
         }
     }
 
-    void AsyncAggreagateGradientsImpl(const std::vector<Matrix<ElemType>*>& gradients)
-    {
-        int deviceId = gradients[0]->GetDeviceId();
-
-        // New aggregation pipeline for non-GDR, perform sync allreduce on the gradient data
-        // For CPU, still use async allreduce
-        std::vector<MPI_Request> allReduceRequests;
-        size_t allReduceIndex = 0;
-        size_t numGradAgg = gradients.size();
-        if (numGradAgg > 0)
-            return;
-
-		// sync main stream
-        cudaStreamSynchronize(cudaStreamDefault);
-        // non-GDR && GPU && non-NCCL: need to copy data from GPU to CPU
-        if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE) && !m_nccl->IsSupported())
-        {
-            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
-            {
-                Matrix<ElemType>* gpuCopyBuffer = gradients[gradIndex];
-                // Async D-to-H copy (next gradient)
-                m_asyncGpuDataTransferers[gradIndex]->CopyGPUToCPUAsync(gpuCopyBuffer->Data(), gpuCopyBuffer->GetNumElements(), m_ayncIntermediateCPUBuffers[gradIndex].get());
-            }
-
-            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
-            {
-                // Wait for previous copy
-                m_asyncGpuDataTransferers[gradIndex]->WaitForCopyGPUToCPUAsync();
-
-                // Allreduce
-                ElemType* reductionBuffer = m_ayncIntermediateCPUBuffers[gradIndex].get();
-                m_mpi->AllReduce(reductionBuffer, gradients[gradIndex]->GetNumElements());
-
-                m_asyncGpuDataTransferers[gradIndex]->CopyCPUToGPUAsync(m_ayncIntermediateCPUBuffers[gradIndex].get(), gradients[gradIndex]->GetNumElements(), gradients[gradIndex]->Data());
-                ++allReduceIndex;
-            }
-        }
-        // non-NCCL, using CPU, using GDR
-        else if (!m_nccl->IsSupported())
-        {
-            ElemType* reductionBuffer;
-            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
-            {
-                allReduceRequests.push_back(MPI_Request());
-                reductionBuffer = gradients[gradIndex]->Data();
-                // CPU
-                if (m_mpi->UseGpuGdr() == 0)
-                {
-                    m_mpi->Iallreduce(MPI_IN_PLACE, reductionBuffer, gradients[gradIndex]->GetNumElements(),
-                                      MPIWrapper::GetDataType(reductionBuffer), MPI_SUM, &allReduceRequests.back()) ||
-                        MpiFail("MPI_Iallreduce");
-                    ++allReduceIndex;
-                }
-                // GDR && GPU
-                else if (deviceId != CPUDEVICE)
-                {
-                    m_mpi->AllReduce(reductionBuffer, gradients[gradIndex]->GetNumElements());
-                }
-            }
-        }
-        else if (m_nccl->IsSupported())
-        {
-            std::vector<Matrix<ElemType>*> ncclReduceGradients;
-            for (size_t gradIndex = 0; gradIndex < numGradAgg; ++gradIndex)
-                ncclReduceGradients.push_back(gradients[gradIndex]);
-
-            m_nccl->AllReduce(ncclReduceGradients);
-        }
-
-        if (m_nccl->IsSupported())
-        {
-            m_nccl->Sync();
-        }
-        // Non-GDR && GPU
-        else if ((m_mpi->UseGpuGdr() == 0) && (deviceId != CPUDEVICE))
-        {
-            // Wait for async CPU-to-GPU copy (non-GDR)
-            for (size_t i = 0; i < allReduceIndex; ++i)
-                m_asyncGpuDataTransferers[i]->WaitForCopyCPUToGPUAsync();
-        }
-        // CPU
-        else if (m_mpi->UseGpuGdr() == 0)
-        {
-            // Wait for the Iallreduce operations to finish
-            for (size_t i = 0; i < allReduceIndex; ++i)
-            {
-                m_mpi->Wait(&allReduceRequests[i], MPI_STATUSES_IGNORE) || MpiFail("MPI_Wait");
-            }
-        }
-    }
-
     void AsyncAggregateGradHeaderImpl(DistGradHeader* headerCPU)
     {
         int numHeaderSample = headerCPU->numSamples;
@@ -913,7 +906,7 @@ private:
             m_intermediateDistributedCPUBuffer1 = AllocateIntermediateBuffer(deviceId, bufferSize);
             m_intermediateDistributedCPUBuffer2 = AllocateIntermediateBuffer(deviceId, bufferSize);
 
-			if (m_asyncAllocator.get() == nullptr)
+            if (m_asyncAllocator.get() == nullptr)
                 m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(deviceId));
         }
     }

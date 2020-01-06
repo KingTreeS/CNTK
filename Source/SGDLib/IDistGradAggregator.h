@@ -50,12 +50,6 @@ public:
     }
 
 public:
-    virtual void AsyncAggreagateGradients(const std::vector<Matrix<ElemType>*>& gradients)
-    {
-        if (gradients.empty())
-            return;
-    };
-
     virtual bool AsyncAggregateGradHeader(DistGradHeader* headerCPU){return headerCPU == nullptr;}
 
 protected:
