@@ -1523,6 +1523,8 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
 #else
                     ASYNCMPI::m_asyncMpi = m_mpi;
+                    if (ASYNCMPI::m_asyncAllocator.get() == nullptr)
+                        ASYNCMPI::m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(::CNTK::DeviceDescriptor::UseDefaultDevice().Id()));
                     AsyncFun backpropAgg = ASYNCMPI::AsyncAggreagateGradients<ElemType>;
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
 					//net->Backprop(criterionNodes[0]);
