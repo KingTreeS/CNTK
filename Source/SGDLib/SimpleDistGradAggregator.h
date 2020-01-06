@@ -20,14 +20,65 @@
 #include "MatrixQuantizerImpl.h"
 #include "ProgressTracing.h"
 
+#include <queue> 
+#include <memory> 
+#include <mutex> 
+#include <condition_variable>
+
 namespace Microsoft
 {
 namespace MSR
 {
 namespace CNTK
 {
+template <typename T>
+class threadsafe_queue
+{
+private:
+    mutable std::mutex mut;
+    std::queue<T> data_queue;
+    std::condition_variable data_cond;
+public:
+    threadsafe_queue() {}
+    threadsafe_queue(threadsafe_queue const& other) = delete;
+
+    void push(const T& new_value)
+    {
+        std::lock_guard<std::mutex> lk(mut);
+        data_queue.push(new_value);
+        data_cond.notify_one();
+    }
+	
+    void wait_and_pop(T& value)
+    {
+        std::unique_lock<std::mutex> lk(mut);
+        data_cond.wait(lk, [this] { return !data_queue.empty(); });
+        value = data_queue.front();
+        data_queue.pop();
+    }
+
+    bool try_pop(T& value)
+    {
+        std::lock_guard<std::mutex> lk(mut);
+        if (data_queue.empty())
+            return false;
+        value = data_queue.front();
+        data_queue.pop();
+        return true;
+    }
+
+    bool empty() const
+    {
+        std::lock_guard<std::mutex> lk(mut);
+        return data_queue.empty();
+    }
+};
+
 namespace ASYNCNCCL
 {
+// init in SGD
+static std::unique_ptr<NcclComm> m_asyncNccl;
+
 template <typename ElemType>
 void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
 {
@@ -66,16 +117,13 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
         }
     }
 }
-
-// init in SGD
-static std::unique_ptr<NcclComm> m_asyncNccl;
 } // namespace ASYNCNCCL
 
 namespace ASYNCMPI
 {
 static MPIWrapperPtr m_asyncMpi;
 static std::unique_ptr<CUDAPageLockedMemAllocator> m_asyncAllocator;
-
+static threadsafe_queue<ComputationNodeBasePtr> m_asyncNodeQueue;
 
 template <typename ElemType>
 std::shared_ptr<ElemType> SyncAllocateIntermediateBuffer(int deviceID, size_t numElements)
@@ -90,13 +138,12 @@ std::shared_ptr<ElemType> SyncAllocateIntermediateBuffer(int deviceID, size_t nu
 }
 
 template <typename ElemType>
-void AsyncAggreagateGradientsImpl(const std::vector<Matrix<ElemType>*> gradients)
+void AsyncAggreagateGradientsImpl(const std::vector<Matrix<ElemType>*>& gradients)
 {
     if (gradients.size() == 0)
         return;
 
     int deviceId = gradients[0]->GetDeviceId();
-    cudaSetDevice(deviceId);
 
     std::vector<std::unique_ptr<GPUDataTransferer>> asyncGpuDataTransferers;
     std::vector<std::shared_ptr<ElemType>> ayncIntermediateCPUBuffers;
@@ -150,55 +197,59 @@ void AsyncAggreagateGradients(const ComputationNodeBasePtr& node)
     if (!node->NeedsGradient())
         return;
 
-	std::chrono::time_point<std::chrono::system_clock> startTime1;
-    std::chrono::time_point<std::chrono::system_clock> endTime1;
-    startTime1 = std::chrono::system_clock::now();
+	m_asyncNodeQueue.push(node);
+}
 
-    shared_ptr<ComputationNode<ElemType>> gradNode = std::dynamic_pointer_cast<ComputationNode<ElemType>>(node);
-    if (gradNode->IsParameterUpdateRequired() && !gradNode->m_distribute)
-    {
-        Matrix<ElemType>* currParamsGradient = &(gradNode->Gradient()); // TODO: we can use shared_ptrs now
+template<typename ElemType>
+void BackpropAsyncMpiThread(const atomic_bool& asyncMpiFlag)
+{
+    if (m_asyncMpi->NumNodesInUse() == 1) // No need to aggregate anything.
+        return;
 
-        // Sometimes, in parallel training, the current node may not get any samples to process
-        // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
-        if (currParamsGradient->GetNumCols() == 0)
-        {
-            Matrix<ElemType>* currParamsValues = &(gradNode->Value());
-            currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
-        }
+	while (true)
+	{
+        if (asyncMpiFlag && m_asyncNodeQueue.empty())
+            break;
 
-        std::vector<Matrix<ElemType>*> learningParamGrad;
-        learningParamGrad.push_back(currParamsGradient);
+		while (!m_asyncNodeQueue.empty())
+		{
+            ComputationNodeBasePtr node;
+            m_asyncNodeQueue.try_pop(node);
 
-		// sync main stream
+            shared_ptr<ComputationNode<ElemType>> gradNode = std::dynamic_pointer_cast<ComputationNode<ElemType>>(node);
+            
+            if (gradNode->IsParameterUpdateRequired() && !gradNode->m_distribute)
+            {
+                Matrix<ElemType>* currParamsGradient = &(gradNode->Gradient()); // TODO: we can use shared_ptrs now
 
-        cudaEvent_t m_asyncEvent;
-        cudaEventCreateWithFlags(&m_asyncEvent, cudaEventDisableTiming);
-        cudaEventRecord(m_asyncEvent);
+				cudaSetDevice(currParamsGradient->GetDeviceId());
+                // Sometimes, in parallel training, the current node may not get any samples to process
+                // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
+                if (currParamsGradient->GetNumCols() == 0)
+                {
+                    Matrix<ElemType>* currParamsValues = &(gradNode->Value());
+                    currParamsGradient->Resize(currParamsValues->GetNumRows(), currParamsValues->GetNumCols());
+                }
 
-        auto rc = cudaEventQuery(m_asyncEvent);
-        if (rc == cudaErrorNotReady)
-            cudaStreamWaitEvent(cudaStreamDefault, m_asyncEvent, 0) || "cudaEventSynchronize failed";
+                std::vector<Matrix<ElemType>*> learningParamGrad;
+                learningParamGrad.push_back(currParamsGradient);
 
-		
-		std::chrono::time_point<std::chrono::system_clock> sdStartTime;
-        std::chrono::time_point<std::chrono::system_clock> sdEndTime;
+                // sync main stream
 
-        sdStartTime = std::chrono::system_clock::now();
+                cudaEvent_t m_asyncEvent;
+                cudaEventCreateWithFlags(&m_asyncEvent, cudaEventDisableTiming);
+                cudaEventRecord(m_asyncEvent);
 
-        // start a new thread
-        std::thread trd(AsyncAggreagateGradientsImpl<ElemType>, learningParamGrad);
-        trd.detach();
+                auto rc = cudaEventQuery(m_asyncEvent);
+                if (rc == cudaErrorNotReady)
+                    cudaStreamWaitEvent(cudaStreamDefault, m_asyncEvent, 0) || "cudaEventSynchronize failed";
 
-		sdEndTime = std::chrono::system_clock::now();
-        double syncTime = (std::chrono::duration<double>(sdEndTime - sdStartTime)).count();
-        fprintf(stderr, "thread time: = %.8gs\n", syncTime);
+				cudaEventDestroy(m_asyncEvent);
 
-        cudaEventDestroy(m_asyncEvent);
-    }
-    endTime1 = std::chrono::system_clock::now();
-    double allTime = (std::chrono::duration<double>(endTime1 - startTime1)).count();
-    fprintf(stderr, "allTime: = %.8gs\n", allTime);
+                AsyncAggreagateGradientsImpl<ElemType>(learningParamGrad);
+            }
+		}
+	}
 }
 } // namespace ASYNCMPI
 

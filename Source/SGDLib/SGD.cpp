@@ -1526,10 +1526,15 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     if (ASYNCMPI::m_asyncAllocator.get() == nullptr)
                         ASYNCMPI::m_asyncAllocator.reset(new CUDAPageLockedMemAllocator(::CNTK::DeviceDescriptor::UseDefaultDevice().Id()));
                     AsyncFun backpropAgg = ASYNCMPI::AsyncAggreagateGradients<ElemType>;
+
+					atomic_bool asyncMpiFlag = false;
+                    std::thread backpropThread(ASYNCMPI::BackpropAsyncMpiThread<ElemType>, std::ref(asyncMpiFlag));
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
-					//net->Backprop(criterionNodes[0]);
+                    asyncMpiFlag = true;
+                    backpropThread.join();
+                    //net->Backprop(criterionNodes[0]);
 #endif
-				}
+                }
 
 #ifdef __PROFILE__
                 endTime = std::chrono::system_clock::now();
@@ -3796,7 +3801,7 @@ SGDParams::SGDParams(const ConfigRecordType& configSGD, size_t sizeofElemType)
                 }
                 else
                     m_modelAggregationBlockSize = 40000 * numMPIWorkers; // default value
-#if 1 // legacy option
+#if 1                                                                    // legacy option
                 if (configMASGD.Exists(L"syncFrequencyInFrames"))
                 {
                     if (configMASGD.Exists(L"blockSizePerWorker") || configMASGD.Exists(L"blockSize"))
