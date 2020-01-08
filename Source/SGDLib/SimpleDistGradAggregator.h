@@ -20,10 +20,11 @@
 #include "MatrixQuantizerImpl.h"
 #include "ProgressTracing.h"
 
-#include <queue> 
-#include <memory> 
-#include <mutex> 
+#include <queue>
+#include <memory>
+#include <mutex>
 #include <condition_variable>
+#include <unordered_map>
 
 namespace Microsoft
 {
@@ -38,6 +39,7 @@ private:
     mutable std::mutex mut;
     std::queue<T> data_queue;
     std::condition_variable data_cond;
+
 public:
     threadsafe_queue() {}
     threadsafe_queue(threadsafe_queue const& other) = delete;
@@ -48,7 +50,7 @@ public:
         data_queue.push(new_value);
         data_cond.notify_one();
     }
-	
+
     void wait_and_pop(T& value)
     {
         std::unique_lock<std::mutex> lk(mut);
@@ -80,6 +82,9 @@ namespace ASYNCNCCL
 static std::unique_ptr<NcclComm> m_asyncNccl;
 
 template <typename ElemType>
+static std::unordered_map<Matrix<ElemType>*, ElemType*> m_updateGradMap;
+
+template <typename ElemType>
 void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
 {
     if (!node->NeedsGradient())
@@ -107,15 +112,30 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
         if (rc == cudaErrorNotReady)
             cudaStreamWaitEvent(cudaStreamDefault, m_asyncEvent, 0) || "cudaEventSynchronize failed";
 
-		cudaEventDestroy(m_asyncEvent);
+        cudaEventDestroy(m_asyncEvent);
 
         if (m_asyncNccl.get() != nullptr)
         {
-            std::vector<Matrix<ElemType>*> learningParamGrad;
-            learningParamGrad.push_back(currParamsGradient);
-            m_asyncNccl->AllReduce(learningParamGrad);
+            size_t elemSize = currParamsGradient->GetNumElements();
+            ElemType* reducedGrad;
+            cudaMalloc((void**) &reducedGrad, sizeof(ElemType) * elemSize);
+
+			m_updateGradMap<ElemType>[currParamsGradient] = reducedGrad;
+            m_asyncNccl->AllReduce(currParamsGradient->Data(), reducedGrad, elemSize);
+            // m_asyncNccl->AllReduce(learningParamGrad);
         }
     }
+}
+
+template <typename ElemType>
+void AsyncUpdateGrad()
+{
+	for (auto& elem : m_updateGradMap<ElemType>)
+	{
+        cudaMemcpy(elem.first->Data(), elem.second, elem.first->GetNumElements() * sizeof(ElemType), cudaMemcpyDeviceToDevice);
+        cudaFree(elem.second);
+	}
+    m_updateGradMap<ElemType>.clear();
 }
 } // namespace ASYNCNCCL
 
@@ -197,32 +217,32 @@ void AsyncAggreagateGradients(const ComputationNodeBasePtr& node)
     if (!node->NeedsGradient())
         return;
 
-	m_asyncNodeQueue.push(node);
+    m_asyncNodeQueue.push(node);
 }
 
-template<typename ElemType>
+template <typename ElemType>
 void BackpropAsyncMpiThread(const atomic_bool& asyncMpiFlag)
 {
     if (m_asyncMpi->NumNodesInUse() == 1) // No need to aggregate anything.
         return;
 
-	while (true)
-	{
+    while (true)
+    {
         if (asyncMpiFlag && m_asyncNodeQueue.empty())
             break;
 
-		while (!m_asyncNodeQueue.empty())
-		{
+        while (!m_asyncNodeQueue.empty())
+        {
             ComputationNodeBasePtr node;
             m_asyncNodeQueue.try_pop(node);
 
             shared_ptr<ComputationNode<ElemType>> gradNode = std::dynamic_pointer_cast<ComputationNode<ElemType>>(node);
-            
+
             if (gradNode->IsParameterUpdateRequired() && !gradNode->m_distribute)
             {
                 Matrix<ElemType>* currParamsGradient = &(gradNode->Gradient()); // TODO: we can use shared_ptrs now
 
-				cudaSetDevice(currParamsGradient->GetDeviceId());
+                cudaSetDevice(currParamsGradient->GetDeviceId());
                 // Sometimes, in parallel training, the current node may not get any samples to process
                 // In this case, the gradient matrix may not have been sized yet. If so, lets size it.
                 if (currParamsGradient->GetNumCols() == 0)
@@ -244,12 +264,12 @@ void BackpropAsyncMpiThread(const atomic_bool& asyncMpiFlag)
                 if (rc == cudaErrorNotReady)
                     cudaStreamWaitEvent(cudaStreamDefault, m_asyncEvent, 0) || "cudaEventSynchronize failed";
 
-				cudaEventDestroy(m_asyncEvent);
+                cudaEventDestroy(m_asyncEvent);
 
                 AsyncAggreagateGradientsImpl<ElemType>(learningParamGrad);
             }
-		}
-	}
+        }
+    }
 }
 } // namespace ASYNCMPI
 
