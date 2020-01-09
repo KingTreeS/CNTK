@@ -1522,7 +1522,12 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     AsyncFun backpropAgg = ASYNCNCCL::BackpropWithGradAggNccl<ElemType>;
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
                     ASYNCNCCL::m_asyncNccl->Sync();
-                    // ASYNCNCCL::AsyncUpdateGrad<ElemType>();
+
+					while (!ASYNCNCCL::m_asyncEventQueue.empty())
+                    {
+                        cudaEventDestroy(ASYNCNCCL::m_asyncEventQueue.front());
+                        ASYNCNCCL::m_asyncEventQueue.pop();
+					}
                     
 #else
                     ASYNCMPI::m_asyncMpi = m_mpi;

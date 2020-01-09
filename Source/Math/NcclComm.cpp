@@ -29,7 +29,7 @@ ncclRedOp_t ncclRedOpFromMpiOp(MPI_Op op)
     else RuntimeError("Invalid MPI_Op");
 }
 
-NcclComm::NcclComm(int deviceId, const MPIWrapperPtr& mpi)
+NcclComm::NcclComm(int deviceId, const MPIWrapperPtr& mpi, bool useSyncStream)
     : m_ncclComm(nullptr), m_stream(nullptr)
 {
     if (deviceId == CPUDEVICE)
@@ -117,8 +117,11 @@ NcclComm::NcclComm(int deviceId, const MPIWrapperPtr& mpi)
         return;
     }
 
-    cudaStreamCreateWithFlags(&m_stream, cudaStreamDefault)
-        || "cudaStreamCreateWithFlags failed";
+	if (useSyncStream)
+        cudaStreamCreateWithFlags(&m_stream, cudaStreamNonBlocking) || "cudaStreamCreateWithFlags failed";
+    else
+        cudaStreamCreateWithFlags(&m_stream, cudaStreamDefault) || "cudaStreamCreateWithFlags failed";
+    
     fprintf(stderr, "NcclComm: initialized\n");
 }
 
@@ -213,12 +216,17 @@ void NcclComm::Sync()
     cudaStreamSynchronize(m_stream) || "NcclComm: cudaStreamSynchronize failed";
 }
 
+cudaStream_t NcclComm::GetStream() const
+{
+    return m_stream;
+}
+
 }}} // end namespaces
 
 #else // !USE_NCCL
 namespace Microsoft { namespace MSR { namespace CNTK {
 
-NcclComm::NcclComm(int /*deviceId*/, const MPIWrapperPtr& /*mpi*/) { }
+NcclComm::NcclComm(int /*deviceId*/, const MPIWrapperPtr& /*mpi*/, bool /*useSyncStream*/) { }
 
 NcclComm::~NcclComm() { }
 
@@ -228,6 +236,11 @@ bool NcclComm::IsSupported()
 }
 
 void NcclComm::Sync() { }
+
+cudaStream_t NcclComm::GetStream() const
+{
+    return NULL;
+}
 
 }}} // end namespaces
 #endif

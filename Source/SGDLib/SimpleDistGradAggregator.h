@@ -81,15 +81,11 @@ namespace ASYNCNCCL
 // init in SGD
 static std::unique_ptr<NcclComm> m_asyncNccl;
 
-template <typename ElemType>
-static std::unordered_map<Matrix<ElemType>*, ElemType*> m_updateGradMap;
+static std::queue<cudaEvent_t> m_asyncEventQueue;
 
 template <typename ElemType>
 void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
 {
-    if (!node->NeedsGradient())
-        return;
-
     shared_ptr<ComputationNode<ElemType>> gradNode = dynamic_pointer_cast<ComputationNode<ElemType>>(node);
     if (gradNode->IsParameterUpdateRequired() && !gradNode->m_distribute)
     {
@@ -104,39 +100,24 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
         }
 
         // sync main stream
-        /*cudaEvent_t m_asyncEvent;
+        cudaEvent_t m_asyncEvent;
         cudaEventCreateWithFlags(&m_asyncEvent, cudaEventDisableTiming);
         cudaEventRecord(m_asyncEvent);
 
+        m_asyncEventQueue.push(m_asyncEvent);
+
         auto rc = cudaEventQuery(m_asyncEvent);
         if (rc == cudaErrorNotReady)
-            cudaStreamWaitEvent(cudaStreamDefault, m_asyncEvent, 0) || "cudaEventSynchronize failed";
-
-        cudaEventDestroy(m_asyncEvent);*/
+            cudaStreamWaitEvent(m_asyncNccl->GetStream(), m_asyncEvent, 0) || "cudaEventSynchronize failed";
 
         if (m_asyncNccl.get() != nullptr)
         {
             size_t elemSize = currParamsGradient->GetNumElements();
-            /*ElemType* reducedGrad;
-            cudaMalloc((void**) &reducedGrad, sizeof(ElemType) * elemSize);
-
-			m_updateGradMap<ElemType>[currParamsGradient] = reducedGrad;*/
             m_asyncNccl->AllReduce(currParamsGradient->Data(), currParamsGradient->Data(), elemSize);
-            // m_asyncNccl->AllReduce(learningParamGrad);
         }
     }
 }
 
-template <typename ElemType>
-void AsyncUpdateGrad()
-{
-	for (auto& elem : m_updateGradMap<ElemType>)
-	{
-        cudaMemcpy(elem.first->Data(), elem.second, elem.first->GetNumElements() * sizeof(ElemType), cudaMemcpyDeviceToDevice);
-        cudaFree(elem.second);
-	}
-    m_updateGradMap<ElemType>.clear();
-}
 } // namespace ASYNCNCCL
 
 namespace ASYNCMPI

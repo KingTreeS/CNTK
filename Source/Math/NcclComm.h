@@ -51,11 +51,13 @@ private:
 #endif
 
 public:
-    NcclComm(int deviceId, const MPIWrapperPtr& mpiComm);
+    NcclComm(int deviceId, const MPIWrapperPtr& mpiComm, bool useSyncStream = false);
     ~NcclComm();
     bool IsSupported();
     void Sync(); // waits for outstanding reductions to complete
-    
+
+    cudaStream_t GetStream() const;
+
     template <typename ElemType>
     void AllReduce(ElemType* inputBuffer, ElemType* outputBuffer, size_t count, MPI_Op op = MPI_SUM)
     {

@@ -232,9 +232,12 @@ ComputationNetwork::PARTraversalFlowControlNode::PARTraversalFlowControlNode(con
         node->EndTiming(true /*backward*/);
         node->EndBackprop();
 
-		if (preNode.get() != nullptr)
-            backpropAggFun(preNode);
-        preNode = node;
+		if (node->NeedsGradient())
+		{
+            if (preNode.get() != nullptr)
+                backpropAggFun(preNode);
+            preNode = node;
+		}
 
         // Extreme Tracing, part 2/4
         if (node->HasEnvironmentPtr() && node->Environment().ShouldDumpNode() && node->NeedsGradient())
