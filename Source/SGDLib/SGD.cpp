@@ -1517,7 +1517,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 {
 #ifdef USE_NCCL
                     if (ASYNCNCCL::m_asyncNccl.get() == nullptr)
-                        ASYNCNCCL::m_asyncNccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi));
+                        ASYNCNCCL::m_asyncNccl.reset(new NcclComm(::CNTK::DeviceDescriptor::UseDefaultDevice().Id(), m_mpi, true));
 
                     AsyncFun backpropAgg = ASYNCNCCL::BackpropWithGradAggNccl<ElemType>;
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
