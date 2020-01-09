@@ -104,7 +104,7 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
         }
 
         // sync main stream
-        cudaEvent_t m_asyncEvent;
+        /*cudaEvent_t m_asyncEvent;
         cudaEventCreateWithFlags(&m_asyncEvent, cudaEventDisableTiming);
         cudaEventRecord(m_asyncEvent);
 
@@ -112,16 +112,16 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
         if (rc == cudaErrorNotReady)
             cudaStreamWaitEvent(cudaStreamDefault, m_asyncEvent, 0) || "cudaEventSynchronize failed";
 
-        cudaEventDestroy(m_asyncEvent);
+        cudaEventDestroy(m_asyncEvent);*/
 
         if (m_asyncNccl.get() != nullptr)
         {
             size_t elemSize = currParamsGradient->GetNumElements();
-            ElemType* reducedGrad;
+            /*ElemType* reducedGrad;
             cudaMalloc((void**) &reducedGrad, sizeof(ElemType) * elemSize);
 
-			m_updateGradMap<ElemType>[currParamsGradient] = reducedGrad;
-            m_asyncNccl->AllReduce(currParamsGradient->Data(), reducedGrad, elemSize);
+			m_updateGradMap<ElemType>[currParamsGradient] = reducedGrad;*/
+            m_asyncNccl->AllReduce(currParamsGradient->Data(), currParamsGradient->Data(), elemSize);
             // m_asyncNccl->AllReduce(learningParamGrad);
         }
     }

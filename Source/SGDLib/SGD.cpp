@@ -1522,7 +1522,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     AsyncFun backpropAgg = ASYNCNCCL::BackpropWithGradAggNccl<ElemType>;
                     net->AsyncBackprop(criterionNodes[0], backpropAgg);
                     ASYNCNCCL::m_asyncNccl->Sync();
-                    ASYNCNCCL::AsyncUpdateGrad<ElemType>();
+                    // ASYNCNCCL::AsyncUpdateGrad<ElemType>();
                     
 #else
                     ASYNCMPI::m_asyncMpi = m_mpi;
