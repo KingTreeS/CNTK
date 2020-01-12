@@ -333,6 +333,7 @@ static bool DumpNode(ComputationNodeBasePtr nodep, bool dumpGradient)
             node2->BeginTiming(true /*backward*/);
             node2->Backprop(t, true /*childrenInThisLoop*/, false /*childrenInOuterLoop*/);
             node2->EndTiming(true /*backward*/);
+            fprintf(stderr, "SEQTraversalFlowControlNode\n");
             // The above flags tell Backprop() to skip back-propagation from inside a node into
             // a node that is outside the loop, which is done later in EndBackprop() in PAR mode.
         }
