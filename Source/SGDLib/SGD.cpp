@@ -1501,6 +1501,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 // compute eval node first since when gradient is computed the forward function values
                 // may be changed and need to be recomputed when gradient and function value share the same matrix
                 net->ForwardProp(forwardPropRoots); // the bulk of this evaluation is reused in ComputeGradient() below
+                cudaStreamSynchronize(cudaStreamDefault);
 #ifdef __PROFILE__
                 endTime = std::chrono::system_clock::now();
                 forwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
@@ -1528,6 +1529,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                         cudaEventDestroy(ASYNCNCCL::m_asyncEventQueue.front());
                         ASYNCNCCL::m_asyncEventQueue.pop();
 					}
+                    cudaStreamSynchronize(cudaStreamDefault);
                     
 #else
                     ASYNCMPI::m_asyncMpi = m_mpi;

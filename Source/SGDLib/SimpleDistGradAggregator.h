@@ -106,15 +106,10 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
 
         m_asyncEventQueue.push(m_asyncEvent);
 
-        auto rc = cudaEventQuery(m_asyncEvent);
-        if (rc == cudaErrorNotReady)
-            cudaStreamWaitEvent(m_asyncNccl->GetStream(), m_asyncEvent, 0) || "cudaEventSynchronize failed";
+        cudaStreamWaitEvent(m_asyncNccl->GetStream(), m_asyncEvent, 0);
 
         if (m_asyncNccl.get() != nullptr)
-        {
-            size_t elemSize = currParamsGradient->GetNumElements();
-            m_asyncNccl->AllReduce(currParamsGradient->Data(), currParamsGradient->Data(), elemSize);
-        }
+            m_asyncNccl->AllReduce(currParamsGradient->Data(), currParamsGradient->Data(), currParamsGradient->GetNumElements());
     }
 }
 

@@ -220,7 +220,6 @@ ComputationNetwork::PARTraversalFlowControlNode::PARTraversalFlowControlNode(con
 
 /*virtual*/ void ComputationNetwork::PARTraversalFlowControlNode::AsyncBackprop(const FrameRange& fr, AsyncFun backpropAggFun) /*override*/
 {
-    ComputationNodeBasePtr preNode;
     // process nodes in pre-determined order
     for (auto pnode = m_nestedNodes.rbegin(); pnode != m_nestedNodes.rend(); pnode++) // iterate backwards over evaluation order
     {
@@ -233,21 +232,12 @@ ComputationNetwork::PARTraversalFlowControlNode::PARTraversalFlowControlNode(con
         node->EndBackprop();
 
 		if (node->NeedsGradient())
-		{
-            if (preNode.get() != nullptr)
-                backpropAggFun(preNode);
-            preNode = node;
-		}
+            backpropAggFun(node);
 
         // Extreme Tracing, part 2/4
         if (node->HasEnvironmentPtr() && node->Environment().ShouldDumpNode() && node->NeedsGradient())
             DumpNode(node, /*dumpGradient=*/true);
-    }
-	if (preNode.get() != nullptr)
-	{
-        backpropAggFun(preNode);
-        preNode.reset();
-	}      
+    }     
 }
 
 /*virtual*/ void ComputationNetwork::PARTraversalFlowControlNode::RequestMatricesBeforeForwardProp(MatrixPool& matrixPool) /*override*/
