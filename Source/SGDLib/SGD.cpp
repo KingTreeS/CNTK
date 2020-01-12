@@ -1501,6 +1501,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                 // compute eval node first since when gradient is computed the forward function values
                 // may be changed and need to be recomputed when gradient and function value share the same matrix
                 net->ForwardProp(forwardPropRoots); // the bulk of this evaluation is reused in ComputeGradient() below
+                cudaStreamSynchronize(cudaStreamDefault);
 #ifdef __PROFILE__
                 endTime = std::chrono::system_clock::now();
                 forwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
@@ -1515,6 +1516,7 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
 #endif
                 if (learnRatePerSample > 0.01 * m_minLearnRate) // only compute gradient when learning rate is large enough
                     net->Backprop(criterionNodes[0]);
+                cudaStreamSynchronize(cudaStreamDefault);
 #ifdef __PROFILE__
                 endTime = std::chrono::system_clock::now();
                 backwardTime += (std::chrono::duration<double>(endTime - startTime)).count();
@@ -1665,6 +1667,8 @@ size_t SGD<ElemType>::TrainOneEpoch(ComputationNetworkPtr net,
                     epochEvalErrors[i] += m_gradHeader->evalErrors[i];
             }
         }
+
+		cudaStreamSynchronize(cudaStreamDefault);
 #ifdef __PROFILE__
         endTime = std::chrono::system_clock::now();
         aggregateTime += (std::chrono::duration<double>(endTime - startTime)).count();
