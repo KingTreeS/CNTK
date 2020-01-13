@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <assert.h>
 #include <atomic>
+#include <cuda_runtime_api.h>
 
 #define DEFAULT_HIDDEN_ACTIVATION 0.1
 
@@ -397,15 +398,17 @@ public:
     // -----------------------------------------------------------------------
 
     ComputationNodeBase(DEVICEID_TYPE deviceId, const wstring& name)
-        : m_deviceId(deviceId), m_outputNeededDuringBackprop(true), m_learningRateMultiplier(0), m_gradientInitializedBy(nullptr), m_nodeName(name == L"" ? CreateUniqNodeName() : name), m_isValueSparse(false), m_distribute(false)
+        : m_deviceId(deviceId), m_outputNeededDuringBackprop(true), m_learningRateMultiplier(0), m_gradientInitializedBy(nullptr), m_nodeName(name == L"" ? CreateUniqNodeName() : name), m_isValueSparse(false), m_distribute(false), m_syncEvent(nullptr)
     {
         // TODO: should m_learningRateMultiplier be set to 0? Or should every node have a way to add its own say on the learning rate for all its inputs?
         // we store a unique numeric number for every node that is constructed, as a debugging aid
         static size_t uniqueNumericId = 0;
         m_uniqueNumericId = uniqueNumericId++;
+        cudaEventCreateWithFlags(&m_syncEvent, cudaEventDisableTiming);
     }
     virtual ~ComputationNodeBase()
     {
+        cudaEventDestroy(m_syncEvent);
     }
 
     virtual void CopyTo(ComputationNodeBasePtr node, const std::wstring& newName, const CopyNodeFlags flags) const
@@ -1158,6 +1161,16 @@ protected:
     float m_learningRateMultiplier;                     // update parameters? Only used for LearnableParameters.    --TODO: Should we make this a member of LearnableParameters actually? And require a type cast? Currently it is read out for all leaves.
     const ComputationNodeBase* m_gradientInitializedBy; // indicates which node initialized the gradient matrix
     bool m_outputNeededDuringBackprop;                  // indicates whether the output value of the node is needed during backprop
+
+
+public:
+    cudaEvent_t GetSyncEvent() const
+    {
+        return m_syncEvent;
+    }
+
+private:
+    cudaEvent_t m_syncEvent;
 };
 typedef ComputationNodeBase::ComputationNodeBasePtr ComputationNodeBasePtr;
 typedef IComputationNode::AsyncFun AsyncFun;

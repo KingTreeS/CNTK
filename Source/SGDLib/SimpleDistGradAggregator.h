@@ -81,8 +81,6 @@ namespace ASYNCNCCL
 // init in SGD
 static std::unique_ptr<NcclComm> m_asyncNccl;
 
-static std::queue<cudaEvent_t> m_asyncEventQueue;
-
 template <typename ElemType>
 void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
 {
@@ -100,13 +98,10 @@ void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)
         }
 
         // sync main stream
-        cudaEvent_t m_asyncEvent;
-        cudaEventCreateWithFlags(&m_asyncEvent, cudaEventDisableTiming);
-        cudaEventRecord(m_asyncEvent);
+        cudaEvent_t m_syncEvent = gradNode->GetSyncEvent();
+        cudaEventRecord(m_syncEvent);
 
-        m_asyncEventQueue.push(m_asyncEvent);
-
-        cudaStreamWaitEvent(m_asyncNccl->GetStream(), m_asyncEvent, 0);
+        cudaStreamWaitEvent(m_asyncNccl->GetStream(), m_syncEvent, 0);
 
         if (m_asyncNccl.get() != nullptr)
             m_asyncNccl->AllReduce(currParamsGradient->Data(), currParamsGradient->Data(), currParamsGradient->GetNumElements());
