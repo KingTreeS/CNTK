@@ -81,7 +81,7 @@ namespace ASYNCNCCL
 // init in SGD
 static std::unique_ptr<NcclComm> m_asyncNccl;
 
-extern void AsyncTimeProfile(void* flag);
+extern void CUDART_CB AsyncTimeProfile(cudaStream_t stream, cudaError_t status, void* flag);
 
 template <typename ElemType>
 void BackpropWithGradAggNccl(const ComputationNodeBasePtr& node)

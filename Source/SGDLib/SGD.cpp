@@ -54,7 +54,7 @@ namespace CNTK
 
 namespace ASYNCNCCL
 {
-void AsyncTimeProfile(void* flag)
+void CUDART_CB AsyncTimeProfile(cudaStream_t stream, cudaError_t status, void* flag)
 {
     const char* flagName = static_cast<char*>(flag);
     fprintf(stderr, "%s", flagName);
