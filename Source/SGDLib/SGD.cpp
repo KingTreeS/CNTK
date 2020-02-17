@@ -52,6 +52,16 @@ namespace MSR
 namespace CNTK
 {
 
+namespace ASYNCNCCL
+{
+void AsyncTimeProfile(void* flag)
+{
+    const char* flagName = static_cast<char*>(flag);
+    fprintf(stderr, "%s", flagName);
+    fprintf(stderr, " time:%lld\n", (long long) (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
+}
+}
+
 using namespace std;
 
 #ifdef __PROFILE__
